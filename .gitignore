@@ -1,0 +1,21 @@
+# 运行二进制(8MB)
+bin/cfst
+
+# 密钥/运行时配置
+conf/config.json
+
+# 运行时产物
+result.csv
+informlog
+verified.txt
+dns_report
+snapshot.json
+last_summary
+last_run_times
+watchdog_fail
+watchdog_last_run
+*.log
+ip/ip.txt
+ip/ipv6.txt
+
+# git
