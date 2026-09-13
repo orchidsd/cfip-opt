@@ -97,10 +97,14 @@ config_validate() {
     st_httping_code=$(json_get '.speed_test.httping_code')
     st_debug=$(json_get '.speed_test.debug')
     st_allip=$(json_get '.speed_test.allip')
+    st_official_first=$(json_get '.speed_test.official_first')
     [[ "$st_httping" =~ ^(true|false)$ ]] || die "speed_test.httping 必须是 true 或 false"
     [[ "$st_httping_code" =~ ^[0-9]{3}$ ]] || die "speed_test.httping_code 必须是三位数字"
     [[ "$st_debug" =~ ^(true|false)$ ]] || die "speed_test.debug 必须是 true 或 false"
     [[ "$st_allip" =~ ^(true|false)$ ]] || die "speed_test.allip 必须是 true 或 false"
+    # official_first 缺省视为 false (兼容旧配置)
+    [[ -z "$st_official_first" ]] && st_official_first=false
+    [[ "$st_official_first" =~ ^(true|false)$ ]] || die "speed_test.official_first 必须是 true 或 false"
 
     local v_enabled v_max v_probes
     v_enabled=$(json_get '.verify.enabled')
@@ -307,9 +311,10 @@ config_edit_account() {
 # 分组 3: 测速设置 (开关/线程/延迟/丢包/速度下限/地址/机场/HTTPing)
 config_edit_speed() {
     echo "==================== 测速设置 ===================="
-    local st_enabled st_threads st_display st_lat_max st_loss_max st_speed_min st_url st_colo st_httping
+    local st_enabled st_threads st_display st_lat_max st_loss_max st_speed_min st_url st_colo st_httping st_official_first
     st_enabled=$(cfg_ask_bool "启用下载测速" "$(json_get '.speed_test.enabled')") || return 0
     if [[ "$st_enabled" == "true" ]]; then
+        st_official_first=$(cfg_ask_bool "官方 CF 测速端点优先(不可用自动回退)" "$(json_get '.speed_test.official_first')") || return 0
         st_threads=$(cfg_ask_num "线程数 (1-1000)" "$(json_get '.speed_test.threads')") || return 0
         st_display=$(cfg_ask_num "显示 IP 数量" "$(json_get '.speed_test.display_count')") || return 0
         st_lat_max=$(cfg_ask_num "平均延迟上限 (ms)" "$(json_get '.speed_test.avg_latency_max')") || return 0
@@ -324,6 +329,7 @@ config_edit_speed() {
     json_set '.speed_test.enabled' "$st_enabled"
     json_set '.speed_test.httping' "$st_httping"
     if [[ "$st_enabled" == "true" ]]; then
+        json_set '.speed_test.official_first' "$st_official_first"
         json_set '.speed_test.threads' "$st_threads"
         json_set '.speed_test.display_count' "$st_display"
         json_set '.speed_test.avg_latency_max' "$st_lat_max"
