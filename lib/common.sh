@@ -81,35 +81,6 @@ url_encode() {
     printf '%s' "$str" | sed 's/[%]/%25/g; s/ /%20/g; s/!/%21/g; s/"/%22/g; s/#/%23/g; s/\$/%24/g; s/&/%26/g; s/'\''/%27/g; s/(/%28/g; s/)/%29/g; s/\*/%2A/g; s/+/%2B/g; s/,/%2C/g; s/-/%2D/g; s/\./%2E/g; s/\//%2F/g; s/:/%3A/g; s/;/%3B/g; s/</%3C/g; s/=/%3D/g; s/>/%3E/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\\/%5C/g; s/\]/%5D/g; s/\^/%5E/g; s/_/%5F/g; s/`/%60/g; s/{/%7B/g; s/|/%7C/g; s/}/%7D/g; s/~/%7E/g'
 }
 
-# HTTP GET/POST/PUT/DELETE 封装 (curl, 带重试与超时, 可加自定义头)
-http_get() {
-    local url="$1" headers="${2:-}"
-    local cmd="curl -sSfL --retry 3 --retry-delay 2 --max-time 15"
-    [[ -n "$headers" ]] && cmd="$cmd -H \"$headers\""
-    eval "$cmd \"$url\""
-}
-
-http_post() {
-    local url="$1" data="$2" headers="${3:-}"
-    local cmd="curl -sSfL --retry 3 --retry-delay 2 --max-time 15 -X POST -d \"$data\""
-    [[ -n "$headers" ]] && cmd="$cmd -H \"$headers\""
-    eval "$cmd \"$url\""
-}
-
-http_put() {
-    local url="$1" data="$2" headers="${3:-}"
-    local cmd="curl -sSfL --retry 3 --retry-delay 2 --max-time 15 -X PUT -d \"$data\""
-    [[ -n "$headers" ]] && cmd="$cmd -H \"$headers\""
-    eval "$cmd \"$url\""
-}
-
-http_delete() {
-    local url="$1" headers="${2:-}"
-    local cmd="curl -sSfL --retry 3 --retry-delay 2 --max-time 15 -X DELETE"
-    [[ -n "$headers" ]] && cmd="$cmd -H \"$headers\""
-    eval "$cmd \"$url\""
-}
-
 # IPv4 / IPv6 / 域名 格式校验 (正则级, 非权威, 仅防格式错误)
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && {

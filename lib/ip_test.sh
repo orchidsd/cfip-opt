@@ -6,7 +6,8 @@
 #   - 产物: $ROOT_DIR/result.csv (候选IP延迟/速度/丢包排名)
 # ============================================================================
 # shellcheck source=lib/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+: "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
+source "$LIB_DIR/common.sh"
 
 # 未配置 colo(地区)时的默认选择: 亚太+美西骨干节点(实测延迟/稳定性均衡)
 readonly CF_COLO_DEFAULT="TPE,HKG,NRT,HND,KIX,SIN,LAX,SJC,SEA,OKA,ICN,FRA"

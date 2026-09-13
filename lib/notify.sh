@@ -5,7 +5,8 @@
 # 信息源: result.csv(本次优选) + last_summary(上一次对比) + dns_report(执行明细)
 # ============================================================================
 # shellcheck source=lib/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+: "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
+source "$LIB_DIR/common.sh"
 
 # Telegram sendMessage 推送, 要求 enabled+token+user_id 完整, 失败不致命(仅警告)
 notify_telegram() {

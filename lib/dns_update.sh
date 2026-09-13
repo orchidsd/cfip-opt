@@ -9,7 +9,8 @@
 #   5. 通知推送由主流程负责(本模块只更新 DNS)
 # ============================================================================
 # shellcheck source=lib/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+: "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
+source "$LIB_DIR/common.sh"
 
 cf_api_base="https://api.cloudflare.com/client/v4/zones"
 
@@ -22,15 +23,22 @@ cf_headers() {
 
 cf_request() {
     local method="$1" url="$2" data="${3:-}"
-    local headers
-    headers=$(cf_headers)
-    local cmd="curl -sSfL --retry 3 --retry-delay 2 --max-time 15 -X $method"
+    local -a curl_args=(-sSfL --retry 3 --retry-delay 2 --max-time 15 -X "$method")
+    local h
     while IFS= read -r h; do
-        cmd="$cmd -H \"$h\""
-    done <<< "$headers"
-    [[ -n "$data" ]] && cmd="$cmd -d '$data'"
-    cmd="$cmd \"$url\""
-    eval "$cmd"
+        [[ -n "$h" ]] && curl_args+=(-H "$h")
+    done <<< "$(cf_headers)"
+    [[ -n "$data" ]] && curl_args+=(-d "$data")
+    curl "${curl_args[@]}" "$url"
+}
+
+# 修正 /etc/hosts 中 api.cloudflare.com 条目: 先清域名再写固定 IP (防 DNS 污染, 避免重复追加)
+cf_hosts_fix() {
+    sed -i '/api\.cloudflare\.com/d' /etc/hosts 2>/dev/null || true
+    printf '%s\n' \
+        "104.18.12.137 api.cloudflare.com" \
+        "104.16.160.55 api.cloudflare.com" \
+        "104.16.96.55 api.cloudflare.com" >> /etc/hosts
 }
 
 cf_verify_credentials() {
@@ -40,7 +48,7 @@ cf_verify_credentials() {
     local max_retries=5
     local i
 
-    sed -i '/api.cloudflare.com/d' /etc/hosts 2>/dev/null || true
+    cf_hosts_fix
 
     for ((i=1; i<=max_retries; i++)); do
         local res
@@ -52,7 +60,7 @@ cf_verify_credentials() {
             return 0
         fi
         warn "Cloudflare 认证失败，重试 ($i/$max_retries)..."
-        echo -e "104.18.12.137 api.cloudflare.com\n104.16.160.55 api.cloudflare.com\n104.16.96.55 api.cloudflare.com" >> /etc/hosts
+        cf_hosts_fix
         sleep 2
     done
     die "Cloudflare 认证失败，请检查邮箱、Zone ID、API Key 或网络"
@@ -260,9 +268,15 @@ dns_update_multi_to_one() {
     slot_keep=$(( max_records - slot_new )); (( slot_keep < 0 )) && slot_keep=0
     del=$(( keep_count - slot_keep ))
     if (( del > 0 )); then
-        sort -n "$kept_file" | head -n "$del" | while read -r _ rid rip; do
-            cf_request "DELETE" "${url}/${rid}" >/dev/null 2>&1 && { warn "清退最旧 $rip"; echo "清退 $rip" >> "$REPORT_FILE"; }
-        done
+        local del_done=0 _ age2 rid2 rip2
+        while read -r age2 rid2 rip2; do
+            if cf_request "DELETE" "${url}/${rid2}" >/dev/null 2>&1; then
+                warn "清退最旧 $rip2"
+                echo "清退 $rip2" >> "$REPORT_FILE"
+                del_done=$((del_done+1))
+            fi
+        done <<< "$(sort -n "$kept_file" | head -n "$del")"
+        keep_count=$(( keep_count - del_done ))
     fi
 
     # 新增本轮验证通过且不在池内的 IP (重叠已保留, 跳过)

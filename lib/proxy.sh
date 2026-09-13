@@ -6,7 +6,8 @@
 # 测速必须停代理: 否则流量走隧道, 测得的延迟/速度反映的是代理链路而非 CF 边缘。
 # ============================================================================
 # shellcheck source=lib/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+: "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
+source "$LIB_DIR/common.sh"
 
 # 客户端别名 -> OpenWrt 服务名(init.d 下的脚本名), 不支持则返回空串
 proxy_client_to_service() {

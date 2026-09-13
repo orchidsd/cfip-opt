@@ -167,9 +167,10 @@ menu() {
         echo "  ${C_GRN}13${C_RST}. 测试通知"
         echo "  ${C_GRN}14${C_RST}. 回滚上次 DNS 快照"
         echo "  ${C_GRN}15${C_RST}. 更新 IP 列表"
+        echo "  ${C_GRN}16${C_RST}. 定时任务       ${C_DIM}优选时刻 / 看门狗间隔${C_RST}"
         echo "  ${C_RED}0${C_RST}. 退出"
         echo
-        read -rp "  ${C_GRN}请输入数字${C_RST} [0-15] ${C_DIM}(回车=退出)${C_RST}: " choice
+        read -rp "  ${C_GRN}请输入数字${C_RST} [0-16] ${C_DIM}(回车=退出)${C_RST}: " choice
         echo
 
         case "$choice" in
@@ -202,6 +203,7 @@ menu() {
             13) config_init; notify_all "测试通知" ;;
             14) config_init; config_validate; cf_verify_credentials; dns_rollback ;;
             15) config_init; config_validate; ip_list_update ;;
+            16) config_init; config_edit_cron || true ;;
             0|"") echo "已退出"; break ;;
             *) echo "无效选项: $choice"; sleep 1; continue ;;
         esac

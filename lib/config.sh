@@ -8,8 +8,9 @@
 #   - 公共问答助手(cfg_ask/cfg_ask_map/cfg_ask_num/cfg_ask_req/cfg_ask_bool):
 #     带当前值回车保留、q取消、EOF安全、枚举行内展示
 # ============================================================================
-# shellcheck source=lib/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# 库路径: 优先用调用方已定义好的 LIB_DIR(绝对路径); 未定义时按本文件自定位
+: "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
+source "$LIB_DIR/common.sh"
 
 config_init() {
     [[ -f "$CONFIG_FILE" ]] || {
@@ -421,6 +422,67 @@ config_edit_notify() {
     info "IP列表与通知已保存"
 }
 
+# ============ 定时任务组 (直接读写 crontab, 与本项目行幂等去重) ============
+cron_run_line() { crontab -l 2>/dev/null | grep "cfip-opt\.sh run" | head -1; }
+cron_wd_line()  { crontab -l 2>/dev/null | grep "watchdog\.sh"   | head -1; }
+cron_hours_now() {
+    local l; l=$(cron_run_line)
+    [[ -n "$l" ]] && echo "$l" | awk '{print $2}' || echo "5,13,21"
+}
+cron_minute_now() {
+    local l; l=$(cron_run_line)
+    [[ -n "$l" ]] && echo "$l" | awk '{print $1}' || echo "0"
+}
+cron_wd_min_now() {
+    local l; l=$(cron_wd_line)
+    [[ -n "$l" ]] && echo "$l" | awk '{gsub(/[^0-9]/,"",$1); print ($1=="" ? 5 : $1)}' || echo "5"
+}
+
+# 分组 7: 定时任务 (优选时刻/看门狗间隔, 直接操作 crontab)
+config_edit_cron() {
+    echo "==================== 定时任务 ===================="
+    echo "当前本项目定时任务:"
+    crontab -l 2>/dev/null | grep -E 'cfip-opt\.sh run|watchdog\.sh' | sed 's/^/  /' || echo "  (无)"
+    echo
+    local RUN="$ROOT_DIR/bin/cfip-opt.sh run"
+    local WD="$ROOT_DIR/bin/watchdog.sh"
+
+    local st_auto_run st_hours st_minute st_wd st_wd_min
+    st_auto_run=$(cfg_ask_bool "启用自动优选" "$(cron_run_line >/dev/null 2>&1 && echo true || echo false)") || return 0
+    if [[ "$st_auto_run" == "true" ]]; then
+        st_hours=$(cfg_ask "每日优选小时 (0-23, 逗号分隔可多个) [$(cron_hours_now)]: " "$(cron_hours_now)") || return 0
+        st_hours=$(echo "$st_hours" | tr -d ' ')
+        while ! [[ "$st_hours" =~ ^[0-9]{1,2}(,[0-9]{1,2})*$ ]]; do
+            echo "    请输入 0-23 的数字或逗号分隔列表, 如 3,11,19"
+            st_hours=$(cfg_ask "每日优选小时 (0-23, 逗号分隔可多个) [5,13,21]: " "5,13,21") || return 0
+        done
+        st_minute=$(cfg_ask_num "每日优选分钟 (0-59)" "$(cron_minute_now)") || return 0
+    fi
+    st_wd=$(cfg_ask_bool "启用看门狗自愈 (每N分钟)" "$(cron_wd_line >/dev/null 2>&1 && echo true || echo false)") || return 0
+    if [[ "$st_wd" == "true" ]]; then
+        st_wd_min=$(cfg_ask_num "看门狗间隔 (分钟)" "$(cron_wd_min_now)") || return 0
+    fi
+
+    echo
+    cfg_save_confirm || return 1
+
+    # 剔除旧的项目行(含已停用任务), 再按当前设置重写
+    local newtab
+    newtab=$(crontab -l 2>/dev/null | grep -vE 'cfip-opt\.sh run|watchdog\.sh')
+    if [[ "$st_auto_run" == "true" ]]; then
+        [[ -n "$newtab" ]] && newtab+=$'\n'
+        newtab+="$st_minute $st_hours * * * $RUN"
+    fi
+    if [[ "$st_wd" == "true" ]]; then
+        [[ -n "$newtab" ]] && newtab+=$'\n'
+        newtab+="*/$st_wd_min * * * * $WD >/dev/null 2>&1"
+    fi
+    printf '%s\n' "$newtab" | crontab -
+    info "定时任务已更新:"
+    crontab -l 2>/dev/null | grep -E 'cfip-opt|watchdog' | sed 's/^/  /'
+    info "定时任务设置已保存"
+}
+
 # 全量入口: 依次走完所有分组 (对应子命令 cfip-opt.sh config)
 config_interactive() {
     config_edit_basic || return 0; echo
@@ -428,5 +490,6 @@ config_interactive() {
     config_edit_speed || return 0; echo
     config_edit_adv || return 0; echo
     config_edit_verify || return 0; echo
-    config_edit_notify || return 0
+    config_edit_notify || return 0; echo
+    config_edit_cron || return 0
 }
