@@ -83,6 +83,28 @@ url_encode() {
     printf '%s' "$str" | sed 's/[%]/%25/g; s/ /%20/g; s/!/%21/g; s/"/%22/g; s/#/%23/g; s/\$/%24/g; s/&/%26/g; s/'\''/%27/g; s/(/%28/g; s/)/%29/g; s/\*/%2A/g; s/+/%2B/g; s/,/%2C/g; s/-/%2D/g; s/\./%2E/g; s/\//%2F/g; s/:/%3A/g; s/;/%3B/g; s/</%3C/g; s/=/%3D/g; s/>/%3E/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\\/%5C/g; s/\]/%5D/g; s/\^/%5E/g; s/_/%5F/g; s/`/%60/g; s/{/%7B/g; s/|/%7C/g; s/}/%7D/g; s/~/%7E/g'
 }
 
+# 判断当前小时是否在 [start, end) 区间内(支持跨午夜): 返回0=在区间
+now_in_peak_range() {
+    local s=$1 e=$2 h
+    h=$(date +%H)
+    if (( s <= e )); then
+        (( h >= s && h < e ))
+    else
+        (( h >= s || h < e ))
+    fi
+}
+
+# 高峰跳过开关: 启用且当前时刻处于高峰时段则返回 0
+peak_hours_active() {
+    local en s e
+    en=$(json_get '.peak_hours.enabled')
+    [[ "$en" == "true" ]] || return 1
+    s=$(json_get '.peak_hours.start'); e=$(json_get '.peak_hours.end')
+    [[ "$s" =~ ^[0-9]+$ ]] || s=21
+    [[ "$e" =~ ^[0-9]+$ ]] || e=6
+    now_in_peak_range "$s" "$e"
+}
+
 # IPv4 / IPv6 / 域名 格式校验 (正则级, 非权威, 仅防格式错误)
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && {

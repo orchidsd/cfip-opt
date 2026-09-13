@@ -129,6 +129,13 @@ config_validate() {
     [[ "$il_auto" =~ ^(true|false)$ ]] || die "ip_list.auto_update 必须是 true 或 false"
     [[ "$il_age" =~ ^[0-9]+$ && "$il_age" -ge 1 && "$il_age" -le 60 ]] || die "ip_list.max_age_days 范围 1-60"
 
+    local pk_en pk_s pk_e
+    pk_en=$(json_get '.peak_hours.enabled')
+    [[ "$pk_en" =~ ^(true|false)$ ]] || die "peak_hours.enabled 必须是 true 或 false"
+    pk_s=$(json_get '.peak_hours.start'); pk_e=$(json_get '.peak_hours.end')
+    [[ "$pk_s" =~ ^[0-9]+$ && "$pk_s" -ge 0 && "$pk_s" -le 23 ]] || die "peak_hours.start 范围 0-23"
+    [[ "$pk_e" =~ ^[0-9]+$ && "$pk_e" -ge 0 && "$pk_e" -le 23 ]] || die "peak_hours.end 范围 0-23"
+
     local proxy_client
     proxy_client=$(json_get '.proxy_client')
     [[ "$proxy_client" =~ ^(passwall|passwall2|shadowsocksr|clash|openclash|bypass|v2raya|hello-world|homeproxy|mihomo|shellcrash|none)$ ]] || die "proxy_client 值无效"
@@ -483,6 +490,26 @@ config_edit_cron() {
     info "定时任务设置已保存"
 }
 
+# 分组 8: 高峰跳过 (电信晚高峰时段跳过优选, 避免测出伪差结果)
+config_edit_peak() {
+    echo "==================== 高峰跳过 ===================="
+    local pk_en pk_s pk_e
+    pk_en=$(cfg_ask_bool "启用高峰时段跳过优选(晚高峰不测速)" "$(json_get '.peak_hours.enabled')") || return 0
+    pk_s=$(json_get '.peak_hours.start'); pk_e=$(json_get '.peak_hours.end')
+    [[ "$pk_s" =~ ^[0-9]+$ ]] || pk_s=21
+    [[ "$pk_e" =~ ^[0-9]+$ ]] || pk_e=6
+    if [[ "$pk_en" == "true" ]]; then
+        pk_s=$(cfg_ask_num "高峰开始小时 (0-23)" "$pk_s") || return 0
+        pk_e=$(cfg_ask_num "高峰结束小时 (0-23, 可跨午夜如 21→6)" "$pk_e") || return 0
+    fi
+    echo
+    cfg_save_confirm || return 1
+    json_set '.peak_hours.enabled' "$pk_en"
+    json_set '.peak_hours.start' "$pk_s"
+    json_set '.peak_hours.end' "$pk_e"
+    info "高峰跳过已保存: 启用=$pk_en, ${pk_s}:00→${pk_e}:00"
+}
+
 # 全量入口: 依次走完所有分组 (对应子命令 cfip-opt.sh config)
 config_interactive() {
     config_edit_basic || return 0; echo
@@ -491,5 +518,6 @@ config_interactive() {
     config_edit_adv || return 0; echo
     config_edit_verify || return 0; echo
     config_edit_notify || return 0; echo
-    config_edit_cron || return 0
+    config_edit_cron || return 0; echo
+    config_edit_peak || return 0
 }

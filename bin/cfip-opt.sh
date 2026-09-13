@@ -48,6 +48,16 @@ main() {
     config_show
 
     proxy_stop
+
+    if peak_hours_active; then
+        local pk_s pk_e
+        pk_s=$(json_get '.peak_hours.start'); pk_e=$(json_get '.peak_hours.end')
+        info "当前处于高峰时段(${pk_s}:00-${pk_e}:00), 跳过本次测速优选 (避免晚高峰假差结果)"
+        proxy_restart
+        notify_all "<b>Cloudflare 优选 IP</b>\n<b>状态</b>: 跳过(高峰)\n<b>原因</b>: $(date '+%H:%M') 处于高峰时段 ${pk_s}:00-${pk_e}:00\n<b>说明</b>: 国际带宽拥塞时测速无参考价值, 任务将在低谷自动优选"
+        return
+    fi
+
     ip_test_run
     dns_update_main
     proxy_restart
@@ -169,9 +179,10 @@ menu() {
         echo "  ${C_GRN}14${C_RST}. 回滚上次 DNS 快照"
         echo "  ${C_GRN}15${C_RST}. 更新 IP 列表"
         echo "  ${C_GRN}16${C_RST}. 定时任务       ${C_DIM}优选时刻 / 看门狗间隔${C_RST}"
+        echo "  ${C_GRN}17${C_RST}. 高峰跳过       ${C_DIM}晚高峰不测速(电信拥塞)${C_RST}"
         echo "  ${C_RED}0${C_RST}. 退出"
         echo
-        read -rp "  ${C_GRN}请输入数字${C_RST} [0-16] ${C_DIM}(回车=退出)${C_RST}: " choice
+        read -rp "  ${C_GRN}请输入数字${C_RST} [0-17] ${C_DIM}(回车=退出)${C_RST}: " choice
         echo
 
         case "$choice" in
@@ -205,6 +216,7 @@ menu() {
             14) config_init; config_validate; cf_verify_credentials; dns_rollback ;;
             15) config_init; config_validate; ip_list_update ;;
             16) config_init; config_edit_cron || true ;;
+            17) config_init; config_edit_peak || true ;;
             0|"") echo "已退出"; break ;;
             *) echo "无效选项: $choice"; sleep 1; continue ;;
         esac
