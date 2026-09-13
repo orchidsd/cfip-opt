@@ -107,7 +107,7 @@ ip_test_run() {
     local port speed_test_enabled speed_test_url speed_test_threads speed_test_display
     local speed_test_latency_max speed_test_latency_min speed_test_speed_min
     local speed_test_test_times speed_test_download_timeout speed_test_display_results speed_test_loss_max
-    local speed_test_httping speed_test_httping_code speed_test_debug speed_test_allip speed_test_official_first
+    local speed_test_httping speed_test_httping_code speed_test_debug speed_test_allip
     port=$(json_get '.port')
     speed_test_enabled=$(json_get '.speed_test.enabled')
     speed_test_url=$(json_get '.speed_test.url')
@@ -124,8 +124,6 @@ ip_test_run() {
     speed_test_httping_code=$(json_get '.speed_test.httping_code')
     speed_test_debug=$(json_get '.speed_test.debug')
     speed_test_allip=$(json_get '.speed_test.allip')
-    speed_test_official_first=$(json_get '.speed_test.official_first')
-    [[ "$speed_test_official_first" =~ ^(true|false)$ ]] || speed_test_official_first=false
     [[ "$speed_test_test_times" =~ ^[0-9]+$ && "$speed_test_test_times" -ge 1 ]] || speed_test_test_times=4
     [[ "$speed_test_download_timeout" =~ ^[0-9]+$ && "$speed_test_download_timeout" -ge 3 ]] || speed_test_download_timeout=15
     [[ "$speed_test_display_results" =~ ^[0-9]+$ ]] || speed_test_display_results=10
@@ -161,39 +159,12 @@ ip_test_run() {
 
     if [[ "$speed_test_enabled" == "true" ]]; then
         local url proto
-        # 端口决定协议(CF 商用端口走 https, 其余走 http)
+        # 端口决定协议(CF 商用端口走 https, 其余走 http); url 为空则用官方端点兜底
         [[ "$port" =~ ^(443|8443|2053|2083|2087|2096)$ ]] && proto="https://" || proto="http://"
-        if [[ "$speed_test_official_first" != "true" ]]; then
-            # 非官方优先: url 有配值用配置, 为空则默认官方端点
-            if [[ -n "$speed_test_url" ]]; then
-                [[ "$speed_test_url" =~ ^https?:// ]] && url="$speed_test_url" || url="${proto}${speed_test_url}"
-            else
-                url="${proto}speed.cloudflare.com/__down?bytes=200000000"
-            fi
+        if [[ -n "$speed_test_url" ]]; then
+            [[ "$speed_test_url" =~ ^https?:// ]] && url="$speed_test_url" || url="${proto}${speed_test_url}"
         else
-            # 官方优先: 用候选池首个 IP 发 1 字节 range 探测官方端点;
-            # 200 -> 用官方端点; 403/429/超时 -> 自动回退配置的地址(通常为 nodejs)
-            # 优先探上次已验证的最优 IP; 首次运行无结果则取 CIDR 候选池剥掩码
-            local probe_ip probe_code
-            probe_ip=$(awk -F, 'NR==2{print $1}' "$ROOT_DIR/result.csv" 2>/dev/null)
-            if [[ -z "$probe_ip" ]]; then
-                probe_ip=$(awk 'NR==1{s=$0; sub("/.*","",s); if(s~/^[0-9.]+$/ || s~/:/){print s}}' "$IP_LIST" 2>/dev/null)
-            fi
-            probe_code="000"
-            [[ -n "$probe_ip" ]] && probe_code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 \
-                --resolve speed.cloudflare.com:$port:"$probe_ip" --max-time 6 \
-                "${proto}speed.cloudflare.com/__down?bytes=100000000" 2>/dev/null)
-            if [[ "$probe_code" == "200" ]]; then
-                url="${proto}speed.cloudflare.com/__down?bytes=200000000"
-                info "官方 CF 端点可直连(code=200), 使用官方测速地址"
-            else
-                info "官方 CF 端点不可用(code=$probe_code), 回退配置的测速地址"
-                if [[ -n "$speed_test_url" ]]; then
-                    [[ "$speed_test_url" =~ ^https?:// ]] && url="$speed_test_url" || url="${proto}${speed_test_url}"
-                else
-                    url="${proto}speed.cloudflare.com/__down?bytes=200000000"
-                fi
-            fi
+            url="${proto}speed.cloudflare.com/__down?bytes=200000000"
         fi
         cfst_args+=("-url" "$url")
         # 记录本轮测速源(供通知展示): 官方端点 / 配置地址, 按 URL 内容自动判别
