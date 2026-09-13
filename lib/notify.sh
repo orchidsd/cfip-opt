@@ -144,8 +144,9 @@ notify_build_message() {
         msg+="\n\n<b>排名</b>(候选 $cnt"
         [[ -n "$pv" ]] && msg+=" · 通过 $pv / 剔除 $fl"
         msg+=")\n<code>\n"
-        msg+="$(printf '%-3s| %-20s| %-8s| %-10s| %-5s| %s\n' '#' 'IP' '延迟' '速度' '丢包' '区')\n"
-        msg+="$(awk -F, 'NR>1 {printf "%-3s| %-20s| %-8s| %-10s| %-5s| %s\n", NR-1, $1, $5"ms", $6"MB/s", $4"%", $2}' "$ROOT_DIR/result.csv" | head -n "$disp")\n"
+        msg+="$(printf '%-3s| %-20s| %-9s| %-10s| %-6s| %s\n' '#' 'IP' '延迟' '速度' '丢包率' '区')\n"
+        # 区码兼容两种 cfst 列布局: 新版 $7=地区码(NRT), 旧版 $7=链接数 -> 回落 $2 国家码
+        msg+="$(awk -F, 'NR>1 {zone=$7; if (zone !~ /^[A-Za-z]{2,4}$/) zone=$2; printf "%-3s| %-20s| %-9s| %-10s| %-6s| %s\n", NR-1, $1, $5"ms", $6"MB/s", $4"%", zone}' "$ROOT_DIR/result.csv" | head -n "$disp")\n"
         msg+="</code>"
 
         if [[ -s "$LAST_SUMMARY" ]]; then
