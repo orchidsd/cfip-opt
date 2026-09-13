@@ -196,8 +196,13 @@ ip_test_run() {
             fi
         fi
         cfst_args+=("-url" "$url")
+        # 记录本轮测速源(供通知展示): 官方端点 / 配置地址, 按 URL 内容自动判别
+        local url_label="配置地址"
+        [[ "$url" == *"speed.cloudflare.com"* ]] && url_label="官方端点"
+        echo "$url|$url_label" > "$SPEED_URL_FILE"
     else
         cfst_args+=("-dd")
+        : > "$SPEED_URL_FILE"
     fi
 
     if [[ "$ip_version" == "ipv4" ]]; then

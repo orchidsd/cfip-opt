@@ -87,8 +87,29 @@ notify_build_message() {
     [[ -z "$fqdn" || "$fqdn" == "." ]] && fqdn=$(json_get '.cloudflare.hostname' | awk '{print $1}')
 
     msg="<b>Cloudflare 优选 IP 完成</b>\n"
-    msg+="<b>时间</b>: $(date '+%F %T')\n"
-    msg+="<b>配置</b>: v$(json_get '.ip_version') / :$(json_get '.port') / 验证≤$(json_get '.verify.max_ms')ms"
+    msg+="<b>时间</b>: $(date '+%F %T')"
+    if [[ -s "$RUN_START_FILE" ]]; then
+        local start now el mins secs
+        start=$(<"$RUN_START_FILE")
+        now=$(date +%s)
+        el=$(( now - start )); (( el < 0 )) && el=0
+        mins=$(( el / 60 )); secs=$(( el % 60 ))
+        if (( mins > 0 )); then
+            msg+=" · 用时 ${mins}分${secs}秒"
+        else
+            msg+=" · 用时 ${secs}秒"
+        fi
+        rm -f "$RUN_START_FILE"
+    fi
+    local iver
+    iver=$(json_get '.ip_version')
+    [[ "$iver" == "ipv6" ]] && iver="IPv6" || iver="IPv4"
+    msg+="\n<b>配置</b>: $iver / :$(json_get '.port') / 验证≤$(json_get '.verify.max_ms')ms"
+    if [[ -s "$SPEED_URL_FILE" ]]; then
+        local su sl
+        IFS='|' read -r su sl < "$SPEED_URL_FILE"
+        [[ -n "$su" ]] && msg+="\n<b>测速源</b>: <code>$su</code>（$sl）"
+    fi
 
     if [[ "$mode" == "domain" ]]; then
         nr=$(json_get '.cloudflare.min_records'); mr=$(json_get '.cloudflare.max_records'); kd=$(json_get '.cloudflare.keep_days')
@@ -101,13 +122,24 @@ notify_build_message() {
     fi
 
     if [[ -s "$ROOT_DIR/result.csv" ]]; then
-        local top_csv top_lat top_speed cnt
+        local top_csv top_lat top_speed cnt pv fl vline
         cnt=$(awk 'END {print NR-1}' "$ROOT_DIR/result.csv")
         top_csv=$(sed -n '2p' "$ROOT_DIR/result.csv")
         top_lat=$(echo "$top_csv" | awk -F, '{print $5}')
         top_speed=$(echo "$top_csv" | awk -F, '{print $6}')
 
-        msg+="\n\n<b>优选结果</b> (候选 $cnt 条)\n<code>\n"
+        pv=""; fl=""
+        if [[ -s "$REPORT_FILE" ]]; then
+            vline=$(grep -m1 '^验证:' "$REPORT_FILE")
+            [[ -n "$vline" ]] && {
+                pv=$(echo "$vline" | sed -n 's/.*通过 *\([0-9][0-9]*\).*/\1/p')
+                fl=$(echo "$vline" | sed -n 's/.*剔除 *\([0-9][0-9]*\).*/\1/p')
+            }
+        fi
+
+        msg+="\n\n<b>优选结果</b> (候选 $cnt 条"
+        [[ -n "$pv" ]] && msg+=" · 通过 $pv / 剔除 $fl"
+        msg+=")\n<code>\n"
         msg+="$(printf '%-3s %-20s %-6s %-7s %-9s %-4s\n' '#' 'IP' '丢包' '延迟' '速度' '区')\n"
         msg+="$(awk -F, 'NR>1 {printf "%-3s %-20s %-6s %-7s %-9s %-4s\n", NR-1, $1, $4, $5"ms", $6"MB/s", $7}' "$ROOT_DIR/result.csv" | head -n "$(json_get '.speed_test.display_count')")\n"
 

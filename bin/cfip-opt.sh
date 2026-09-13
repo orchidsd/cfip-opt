@@ -40,6 +40,7 @@ source "$LIB_DIR/proxy.sh"
 main() {
     config_init
     config_validate
+    date +%s > "$RUN_START_FILE"
 
     > "$LOG_FILE"
 

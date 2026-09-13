@@ -19,6 +19,8 @@ set -euo pipefail
 : "${REPORT_FILE:=$ROOT_DIR/dns_report}"
 : "${SNAPSHOT_FILE:=$ROOT_DIR/snapshot.json}"
 : "${LAST_SUMMARY:=$ROOT_DIR/last_summary}"
+: "${SPEED_URL_FILE:=$ROOT_DIR/last_speed_url}"
+: "${RUN_START_FILE:=$ROOT_DIR/run_start}"
 : "${WATCHDOG_FAIL:=$ROOT_DIR/watchdog_fail}"
 : "${WATCHDOG_RUN_TS:=$ROOT_DIR/watchdog_last_run}"
 : "${WATCHDOG_LAST:=$ROOT_DIR/watchdog_last_check}"
