@@ -80,13 +80,19 @@ notify_all() {
 # 组装 HTML 格式的推送消息并打印(供 notify_all / main 使用)
 #   - 固定/浮动池以文字区分; 候选明细带表头; 与上次对比显示 ↑↓ 趋势
 notify_build_message() {
-    local mode strategy fqdn msg nr mr kd kd_str
+    local mode strategy fqdn nr mr kd kd_str iver cnt pv fl
+    local msg
     mode=$(json_get '.mode')
     strategy=$(json_get '.cloudflare.strategy')
     fqdn="$(json_get '.cloudflare.subdomain').$(json_get '.cloudflare.domain')"
     [[ -z "$fqdn" || "$fqdn" == "." ]] && fqdn=$(json_get '.cloudflare.hostname' | awk '{print $1}')
 
-    msg="<b>Cloudflare 优选 IP 完成</b>\n"
+    iver=$(json_get '.ip_version')
+    [[ "$iver" == "ipv6" ]] && iver="IPv6" || iver="IPv4"
+
+    # ---- 信息块: 时间·耗时 / 配置 / 测速源 / 解析 ----
+    msg="<b>Cloudflare 优选 IP</b>\n"
+    msg+="<b>状态</b>: 完成\n"
     msg+="<b>时间</b>: $(date '+%F %T')"
     if [[ -s "$RUN_START_FILE" ]]; then
         local start now el mins secs
@@ -101,16 +107,12 @@ notify_build_message() {
         fi
         rm -f "$RUN_START_FILE"
     fi
-    local iver
-    iver=$(json_get '.ip_version')
-    [[ "$iver" == "ipv6" ]] && iver="IPv6" || iver="IPv4"
-    msg+="\n<b>配置</b>: $iver / :$(json_get '.port') / 验证≤$(json_get '.verify.max_ms')ms"
+    msg+="\n<b>配置</b>: $iver · :$(json_get '.port') · 验证≤$(json_get '.verify.max_ms')ms"
     if [[ -s "$SPEED_URL_FILE" ]]; then
         local su sl
         IFS='|' read -r su sl < "$SPEED_URL_FILE"
-        [[ -n "$su" ]] && msg+="\n<b>测速源</b>: <code>$su</code>（$sl）"
+        [[ -n "$su" ]] && msg+="\n<b>测速源</b>: <code>$su</code>($sl)"
     fi
-
     if [[ "$mode" == "domain" ]]; then
         nr=$(json_get '.cloudflare.min_records'); mr=$(json_get '.cloudflare.max_records'); kd=$(json_get '.cloudflare.keep_days')
         if [[ "$nr" == "$mr" ]]; then
@@ -118,11 +120,12 @@ notify_build_message() {
         else
             kd_str="目标${nr}条 上限${mr}条 保留${kd}天"
         fi
-        msg+="\n<b>解析</b>: $fqdn ($strategy $kd_str)"
+        msg+="\n<b>解析</b>: $fqdn($strategy $kd_str)"
     fi
 
+    # ---- 排名表格: 竖线分隔(规避中文宽度错位), 区码取第2列 ----
     if [[ -s "$ROOT_DIR/result.csv" ]]; then
-        local top_csv top_lat top_speed cnt pv fl vline
+        local top_csv top_lat top_speed vline disp
         cnt=$(awk 'END {print NR-1}' "$ROOT_DIR/result.csv")
         top_csv=$(sed -n '2p' "$ROOT_DIR/result.csv")
         top_lat=$(echo "$top_csv" | awk -F, '{print $5}')
@@ -137,11 +140,13 @@ notify_build_message() {
             }
         fi
 
-        msg+="\n\n<b>优选结果</b> (候选 $cnt 条"
+        disp=$(json_get '.speed_test.display_count')
+        msg+="\n\n<b>排名</b>(候选 $cnt"
         [[ -n "$pv" ]] && msg+=" · 通过 $pv / 剔除 $fl"
         msg+=")\n<code>\n"
-        msg+="$(printf '%-3s %-20s %-6s %-7s %-9s %-4s\n' '#' 'IP' '丢包' '延迟' '速度' '区')\n"
-        msg+="$(awk -F, 'NR>1 {printf "%-3s %-20s %-6s %-7s %-9s %-4s\n", NR-1, $1, $4, $5"ms", $6"MB/s", $7}' "$ROOT_DIR/result.csv" | head -n "$(json_get '.speed_test.display_count')")\n"
+        msg+="$(printf '%-3s| %-20s| %-8s| %-10s| %-5s| %s\n' '#' 'IP' '延迟' '速度' '丢包' '区')\n"
+        msg+="$(awk -F, 'NR>1 {printf "%-3s| %-20s| %-8s| %-10s| %-5s| %s\n", NR-1, $1, $5"ms", $6"MB/s", $4"%", $2}' "$ROOT_DIR/result.csv" | head -n "$disp")\n"
+        msg+="</code>"
 
         if [[ -s "$LAST_SUMMARY" ]]; then
             local prev prev_lat prev_speed dlat trend
@@ -152,13 +157,13 @@ notify_build_message() {
             [[ "$prev_lat" =~ ^[0-9.]+$ ]] || prev_lat=0
             dlat=$(awk -v a="$prev_lat" -v b="$top_lat" 'BEGIN{printf "%.1f", b-a}')
             trend=$(awk -v d="$dlat" 'BEGIN{if (d<0) print "↓"; else if (d>0) print "↑"; else print "="}')
-            msg+="</code>\n<b>较上次</b>: 延迟 ${prev_lat}ms→${top_lat}ms ${trend}(${dlat}ms) · 速度 ${prev_speed}→${top_speed}MB/s"
+            msg+="\n<b>较上次</b>: 延迟 ${prev_lat}ms→${top_lat}ms ${trend}(${dlat}ms) · 速度 ${prev_speed}→${top_speed}MB/s\n"
         else
-            msg+="</code>\n<b>基准</b>: 延迟 ${top_lat}ms · 速度 ${top_speed}MB/s (首个基准，下次起对比)"
+            msg+="\n<b>基准</b>: 延迟 ${top_lat}ms · 速度 ${top_speed}MB/s (首个基准，下次起对比)\n"
         fi
-        msg+="\n"
     fi
 
+    # ---- 执行明细 ----
     if [[ -s "$REPORT_FILE" ]]; then
         msg+="\n<b>执行明细</b>\n<code>\n"
         msg+="$(head -n 30 "$REPORT_FILE")\n"
