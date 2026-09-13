@@ -6,7 +6,8 @@
 #   1) 就地安装(推荐): 把整个项目 scp 上路由器后
 #        cd /root/cfip-opt && bash bin/install.sh
 #   2) 远程引导: 项目推送到 Git 仓库后，一条命令零文件到位
-#        REPO_URL=https://github.com/you/cfip-opt wget -qO- .../install.sh | bash
+#        REPO_URL=https://github.com/orchidsd/cfip-opt git clone --depth 1 \$REPO_URL /tmp/cfip-opt \
+#            && bash /tmp/cfip-opt/bin/install.sh
 #
 # 做的事: 安装系统依赖(bash/jq/curl/...) -> 按架构下载 cfst 测速二进制
 #        -> 准备 IP 文本 -> 生成配置文件 -> 注册定时任务/cfip 命令
@@ -18,7 +19,7 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/root/cfip-opt}"
 
 # 远程引导用的仓库地址（git 仓库或 tar.gz 包地址）
-REPO_URL="${REPO_URL:-https://github.com/XIU2/fastip-auto.git}"
+REPO_URL="${REPO_URL:-https://github.com/orchidsd/cfip-opt.git}"
 
 # --------------------------------------------------------------------------
 # 第 0 步: 项目文件定位(就地/已装/远程引导) —— 必须在 source common 之前,
