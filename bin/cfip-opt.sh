@@ -180,9 +180,10 @@ menu() {
         echo "  ${C_GRN}15${C_RST}. 更新 IP 列表"
         echo "  ${C_GRN}16${C_RST}. 定时任务       ${C_DIM}优选时刻 / 看门狗间隔${C_RST}"
         echo "  ${C_GRN}17${C_RST}. 高峰跳过       ${C_DIM}晚高峰不测速(电信拥塞)${C_RST}"
+        echo "  ${C_GRN}18${C_RST}. 启动代理客户端 ${C_DIM}停止后手动拉起(恢复断网)${C_RST}"
         echo "  ${C_RED}0${C_RST}. 退出"
         echo
-        read -rp "  ${C_GRN}请输入数字${C_RST} [0-17] ${C_DIM}(回车=退出)${C_RST}: " choice
+        read -rp "  ${C_GRN}请输入数字${C_RST} [0-18] ${C_DIM}(回车=退出)${C_RST}: " choice
         echo
 
         case "$choice" in
@@ -217,6 +218,7 @@ menu() {
             15) config_init; config_validate; ip_list_update ;;
             16) config_init; config_edit_cron || true ;;
             17) config_init; config_edit_peak || true ;;
+            18) config_init; proxy_start ;;
             0|"") echo "已退出"; break ;;
             *) echo "无效选项: $choice"; sleep 1; continue ;;
         esac
@@ -277,8 +279,13 @@ case "${1:-run}" in
         ip_list_update
         ;;
 
+    start)
+        config_init
+        proxy_start
+        ;;
+
     *)
-        echo "用法: $0 {run|config|show|test|dns|status|notify|rollback|ipupdate}"
+        echo "用法: $0 {run|config|show|test|dns|status|notify|rollback|ipupdate|start}"
         echo "  裸命令(交互终端)   - 数字菜单"
         echo "  run      - 执行完整优选流程 (默认, 适合 cron)"
         echo "  config   - 交互式配置"
@@ -289,6 +296,7 @@ case "${1:-run}" in
         echo "  notify   - 测试通知"
         echo "  rollback - 回滚上次 DNS 快照"
         echo "  ipupdate - 立即更新 IP 列表"
+        echo "  start    - 手动启动代理客户端"
         exit 1
         ;;
 esac

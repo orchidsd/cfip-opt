@@ -9,6 +9,22 @@
 : "${LIB_DIR:="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}"
 source "$LIB_DIR/common.sh"
 
+proxy_start() {
+    local client service
+    client=$(json_get '.proxy_client')
+    [[ "$client" == "none" ]] && { info "未配置代理客户端，跳过启动"; return 0; }
+
+    service=$(proxy_client_to_service "$client")
+    [[ -n "$service" ]] || { warn "未知代理客户端: $client"; return 1; }
+
+    if [[ -f "/etc/init.d/$service" ]]; then
+        info "启动代理服务: $service"
+        /etc/init.d/"$service" start
+    else
+        warn "服务脚本不存在: /etc/init.d/$service"
+    fi
+}
+
 # 客户端别名 -> OpenWrt 服务名(init.d 下的脚本名), 不支持则返回空串
 proxy_client_to_service() {
     local client="$1"
