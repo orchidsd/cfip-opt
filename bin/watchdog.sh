@@ -16,6 +16,19 @@ LOCK_DIR="$ROOT_DIR/.watchdog.lock"
 mkdir "$LOCK_DIR" 2>/dev/null || exit 0
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
+# 自愈: /usr/bin/cfip 软链失效(如临时安装目录被清)则重指本项目
+repair_cfip_link() {
+    local link="/usr/bin/cfip" target="$BIN_DIR/cfip-opt.sh"
+    [[ -e "$target" ]] || return 0
+    if [[ -L "$link" && "$(readlink "$link" 2>/dev/null)" == "$target" ]]; then
+        return 0
+    fi
+    ln -sf "$target" "$link" 2>/dev/null \
+        || { warn "看门狗: 修复 /usr/bin/cfip 软链失败"; return 0; }
+    info "看门狗: 修复 /usr/bin/cfip -> $target"
+}
+repair_cfip_link
+
 config_init >/dev/null 2>&1 || exit 0
 config_validate >/dev/null 2>&1 || exit 0
 
