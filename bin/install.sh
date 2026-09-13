@@ -5,9 +5,9 @@
 # 两种用法（都能在任何 OpenWrt / Alpine / Debian / CentOS 上运行）:
 #   1) 就地安装(推荐): 把整个项目 scp 上路由器后
 #        cd /root/cfip-opt && bash bin/install.sh
-#   2) 远程引导: 项目推送到 Git 仓库后，一条命令零文件到位
-#        REPO_URL=https://github.com/orchidsd/cfip-opt git clone --depth 1 \$REPO_URL /tmp/cfip-opt \
-#            && bash /tmp/cfip-opt/bin/install.sh
+#   2) 远程一键安装(不依赖 git):
+#        bash -c 'curl -fsSL https://github.com/orchidsd/cfip-opt/archive/refs/heads/main.tar.gz | tar xz -C /tmp && mv /tmp/cfip-opt-main /tmp/cfip-opt && bash /tmp/cfip-opt/bin/install.sh'
+#        国内不通时把 URL 换成 https://ghfast.top/https://github.com/... 即可
 #
 # 做的事: 安装系统依赖(bash/jq/curl/...) -> 按架构下载 cfst 测速二进制
 #        -> 准备 IP 文本 -> 生成配置文件 -> 注册定时任务/cfip 命令
