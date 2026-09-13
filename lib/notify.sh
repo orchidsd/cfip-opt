@@ -144,10 +144,10 @@ notify_build_message() {
         msg+="\n\n<b>排名</b>(候选 $cnt"
         [[ -n "$pv" ]] && msg+=" · 通过 $pv / 剔除 $fl"
         msg+=")\n<pre>\n"
-        # 表头全英文: 中文占2格会导致 printf 按1格补齐错位, ASCII 精确对齐
-        msg+="$(printf '%-4s %-18s %-11s %-13s %-8s %s\n' '#' 'IP' 'Latency' 'Speed' 'Loss' 'Region')\n"
+        # 极窄表头: 全ASCII 1:1对齐, 整行≤36字符保证手机一行放下不折行(丢包基本为0故省略)
+        msg+="$(printf '%-2s %-15s %-6s %-6s %s\n' '#' 'IP' 'ms' 'MB/s' 'REG')\n"
         # 区码兼容两种 cfst 列布局: 新版 $7=地区码(NRT), 旧版 $7=链接数 -> 回落 $2 国家码
-        msg+="$(awk -F, 'NR>1 {zone=$7; if (zone !~ /^[A-Za-z]{2,4}$/) zone=$2; printf "%-4s %-18s %-11s %-13s %-8s %s\n", NR-1, $1, $5"ms", $6"MB/s", $4"%", zone}' "$ROOT_DIR/result.csv" | head -n "$disp")\n"
+        msg+="$(awk -F, 'NR>1 {zone=$7; if (zone !~ /^[A-Za-z]{2,4}$/) zone=$2; printf "%-2s %-15s %-6s %-6s %s\n", NR-1, $1, $5, $6, zone}' "$ROOT_DIR/result.csv" | head -n "$disp")\n"
         msg+="</pre>"
 
         if [[ -s "$LAST_SUMMARY" ]]; then
