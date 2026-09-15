@@ -48,12 +48,16 @@ main() {
     config_show
 
     proxy_stop
+    # 兜底: 任何中途退出(die/断电/Ctrl-C)都恢复代理, 避免停在停止态断网
+    PROXY_RESTORED=0
+    trap 'cleanup_temp; proxy_ensure_restored || true' EXIT INT
 
     if peak_hours_active; then
         local pk_s pk_e
         pk_s=$(json_get '.peak_hours.start'); pk_e=$(json_get '.peak_hours.end')
         info "当前处于高峰时段(${pk_s}:00-${pk_e}:00), 跳过本次测速优选 (避免晚高峰假差结果)"
         proxy_restart
+        PROXY_RESTORED=1
         notify_all "<b>Cloudflare 优选 IP</b>\n<b>状态</b>: 跳过(高峰)\n<b>原因</b>: $(date '+%H:%M') 处于高峰时段 ${pk_s}:00-${pk_e}:00\n<b>说明</b>: 国际带宽拥塞时测速无参考价值, 任务将在低谷自动优选"
         return
     fi
@@ -61,6 +65,7 @@ main() {
     ip_test_run
     dns_update_main
     proxy_restart
+    PROXY_RESTORED=1
 
     notify_all "$(notify_build_message)"
 
@@ -85,9 +90,12 @@ test_only() {
     > "$LOG_FILE"
     info "=== 仅测速 (不更新 DNS) ==="
     proxy_stop
+    PROXY_RESTORED=0
+    trap 'cleanup_temp; proxy_ensure_restored || true' EXIT INT
     ip_test_run
     ip_test_get_info
     proxy_restart
+    PROXY_RESTORED=1
     info "=== 测速完成 ==="
 }
 
@@ -100,8 +108,13 @@ status() {
     svc=$(proxy_client_to_service "$client")
     printf '=%.0s' $(seq 1 52); echo
     echo "=== 运行状态 ==="
-    if [[ -n "$svc" ]] && /etc/init.d/"$svc" status >/dev/null 2>&1; then
-        echo "[代理] $svc: 运行中"
+    if [[ -n "$svc" ]]; then
+        # 用进程判定替代 init.d status: openclash 的 status 子命令会挂起(见 AGENTS)
+        if pgrep -f "/etc/$svc" >/dev/null 2>&1 || pgrep -x "$svc" >/dev/null 2>&1; then
+            echo "[代理] $svc: 运行中"
+        else
+            echo "[代理] $svc: 未运行"
+        fi
     else
         echo "[代理] $svc: 未运行"
     fi
@@ -168,8 +181,8 @@ menu() {
         echo "  ${C_GRN}4${C_RST}. 基本设置       ${C_DIM}模式 / IP / 端口${C_RST}"
         echo "  ${C_GRN}5${C_RST}. 代理客户端   当前: ${C_GRN}$client${C_RST} ${C_DIM}(枚举选择)${C_RST}"
         echo "  ${C_GRN}6${C_RST}. 账号与解析池   ${C_DIM}邮箱 / API Key / 池条数${C_RST}"
-        echo "  ${C_GRN}7${C_RST}. 测速设置       ${C_DIM}线程 / 延迟 / 丢包 / 地址${C_RST}"
-        echo "  ${C_GRN}8${C_RST}. 高级参数       ${C_DIM}低频微调项${C_RST}"
+        echo "  ${C_GRN}7${C_RST}. 测速设置       ${C_DIM}线程 / 延迟 / 丢包 / 地址 / 地区${C_RST}"
+        echo "  ${C_GRN}8${C_RST}. 输出与调试     ${C_DIM}显示条数 / debug / 重启等待${C_RST}"
         echo "  ${C_GRN}9${C_RST}. 验证与自愈     ${C_DIM}推送前验证 / 看门狗${C_RST}"
         echo "  ${C_GRN}10${C_RST}. IP列表与通知   ${C_DIM}TG / PushPlus${C_RST}"
         echo "  ${C_DIM}---- 查看 / 工具 ----${C_RST}"
@@ -203,7 +216,7 @@ menu() {
                     *) echo "已取消" ;;
                 esac
                 ;;
-            3) config_init; config_validate; cf_verify_credentials; dns_update_main ;;
+            3) config_init; config_validate; dns_update_main ;;
             4) config_init; config_edit_basic || true ;;
             5) config_init; config_change_client || true ;;
             6) config_init; config_edit_account || true ;;
@@ -253,7 +266,6 @@ case "${1:-run}" in
     dns)
         config_init
         config_validate
-        cf_verify_credentials
         dns_update_main
         ;;
 
