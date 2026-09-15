@@ -4,7 +4,7 @@
   "port": 443,
   "speed_test": {
     "enabled": true,
-    "url": "https://nodejs.org/dist/v20.11.0/node-v20.11.0.tar.gz",
+    "url": "",
     "threads": 200,
     "display_count": 10,
     "test_times": 4,

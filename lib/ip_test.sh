@@ -12,7 +12,8 @@ source "$LIB_DIR/common.sh"
 # 未配置 colo(地区)时的默认选择: 亚太+美西骨干节点(实测延迟/稳定性均衡)
 readonly CF_COLO_DEFAULT="TPE,HKG,NRT,HND,KIX,SIN,LAX,SJC,SEA,OKA,ICN,FRA"
 
-# ip.txt 的三个镜像源(依次降级), %s 由 ip_version 填充为 ip/ipv6
+# ip.txt 镜像源(依次降级): XIU2 库 = 官方公开段(ips-v4/ips-v6)拆分过滤后的
+# 细分候选(/24粒度), 直接拉官方粗段(/13 /14)会被 cfst 展开成上百万 IP 不可用
 ip_list_mirrors() {
     echo "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/%s.txt"
     echo "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/%s.txt"

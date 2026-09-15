@@ -103,6 +103,14 @@ config_validate() {
     [[ "$st_debug" =~ ^(true|false)$ ]] || die "speed_test.debug 必须是 true 或 false"
     [[ "$st_allip" =~ ^(true|false)$ ]] || die "speed_test.allip 必须是 true 或 false"
 
+    local st_lat_max st_lat_min st_speed_min
+    st_lat_max=$(json_get '.speed_test.avg_latency_max')
+    st_lat_min=$(json_get '.speed_test.avg_latency_min')
+    st_speed_min=$(json_get '.speed_test.download_speed_min')
+    [[ "$st_lat_max" =~ ^[0-9]+$ && "$st_lat_max" -ge 0 ]] || die "speed_test.avg_latency_max 必须是非负整数"
+    [[ "$st_lat_min" =~ ^[0-9]+$ && "$st_lat_min" -ge 0 ]] || die "speed_test.avg_latency_min 必须是非负整数"
+    [[ "$st_speed_min" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "speed_test.download_speed_min 必须是非负数字"
+
     local v_enabled v_max v_probes
     v_enabled=$(json_get '.verify.enabled')
     v_max=$(json_get '.verify.max_ms')
@@ -224,6 +232,15 @@ cfg_ask_req() {
     done
 }
 
+cfg_ask_opt() {
+    # 可选项文本: 留空返回空串(表示交给上游用默认), 回车=空; q=取消
+    local label cur v; label=$1; cur=$2
+    read -rp "  $label [当前: ${cur:-空(官方端点)}] (回车=留空, q=取消): " v
+    [[ "$v" == "q" || "$v" == "Q" ]] && return 1
+    echo "$v"
+    return 0
+}
+
 cfg_save_confirm() {
     # 各组末尾的确认保存, 返回 1 表示取消
     local v
@@ -312,61 +329,63 @@ config_edit_account() {
     info "账号与解析池已保存"
 }
 
-# 分组 3: 测速设置 (开关/线程/延迟/丢包/速度下限/地址/机场/HTTPing)
+# 分组 3: 测速设置 (开关/地址/线程/延迟阈值/丢包/下载/HTTPing/地区)
 config_edit_speed() {
     echo "==================== 测速设置 ===================="
-    local st_enabled st_threads st_display st_lat_max st_loss_max st_speed_min st_url st_colo st_httping
+    local st_enabled st_url st_threads st_test_times st_lat_max st_lat_min st_loss_max
+    local st_speed_min st_display st_download_timeout st_httping st_httping_code st_colo
     st_enabled=$(cfg_ask_bool "启用下载测速" "$(json_get '.speed_test.enabled')") || return 0
+    st_url=$(cfg_ask_opt "测速地址 (留空=官方端点 speed.cloudflare.com)" "$(json_get '.speed_test.url')") || return 0
+    st_threads=$(cfg_ask_num "线程数 (1-1000)" "$(json_get '.speed_test.threads')") || return 0
+    st_test_times=$(cfg_ask_num "延迟测速次数" "$(json_get '.speed_test.test_times')") || return 0
+    st_lat_max=$(cfg_ask_num "平均延迟上限 (ms)" "$(json_get '.speed_test.avg_latency_max')") || return 0
+    st_lat_min=$(cfg_ask_num "平均延迟下限 (ms)" "$(json_get '.speed_test.avg_latency_min')") || return 0
+    st_loss_max=$(cfg_ask_num "丢包率上限 (0.00-1.00)" "$(json_get '.speed_test.packet_loss_max')") || return 0
     if [[ "$st_enabled" == "true" ]]; then
-        st_threads=$(cfg_ask_num "线程数 (1-1000)" "$(json_get '.speed_test.threads')") || return 0
-        st_display=$(cfg_ask_num "显示 IP 数量" "$(json_get '.speed_test.display_count')") || return 0
-        st_lat_max=$(cfg_ask_num "平均延迟上限 (ms)" "$(json_get '.speed_test.avg_latency_max')") || return 0
-        st_loss_max=$(cfg_ask_num "丢包率上限 (0.00-1.00)" "$(json_get '.speed_test.packet_loss_max')") || return 0
         st_speed_min=$(cfg_ask_num "下载速度下限 (MB/s, 0=不限)" "$(json_get '.speed_test.download_speed_min')") || return 0
-        st_url=$(cfg_ask "测速地址 [留空=官方端点]: " "$(json_get '.speed_test.url')") || return 0
-        st_colo=$(cfg_ask "机场扫描 (逗号分隔, 回车默认) [$(json_get '.speed_test.colo')]: " "$(json_get '.speed_test.colo')") || return 0
+        st_display=$(cfg_ask_num "下载测速 IP 数量" "$(json_get '.speed_test.display_count')") || return 0
+        st_download_timeout=$(cfg_ask_num "单个 IP 下载限时 (s)" "$(json_get '.speed_test.download_timeout')") || return 0
     fi
     st_httping=$(cfg_ask_bool "延迟测速用 HTTP 协议" "$(json_get '.speed_test.httping')") || return 0
+    if [[ "$st_httping" == "true" ]]; then
+        st_httping_code=$(cfg_ask_num "HTTPing 有效状态码" "$(json_get '.speed_test.httping_code')") || return 0
+    fi
+    st_colo=$(cfg_ask "地区过滤 (逗号分隔, 仅 HTTPing+IPv4 生效) [$(json_get '.speed_test.colo')]: " "$(json_get '.speed_test.colo')") || return 0
     echo
     cfg_save_confirm || return 1
     json_set '.speed_test.enabled' "$st_enabled"
+    json_set '.speed_test.url' "$st_url"
+    json_set '.speed_test.threads' "$st_threads"
+    json_set '.speed_test.test_times' "$st_test_times"
+    json_set '.speed_test.avg_latency_max' "$st_lat_max"
+    json_set '.speed_test.avg_latency_min' "$st_lat_min"
+    json_set '.speed_test.packet_loss_max' "$st_loss_max"
     json_set '.speed_test.httping' "$st_httping"
+    json_set '.speed_test.colo' "$st_colo"
     if [[ "$st_enabled" == "true" ]]; then
-        json_set '.speed_test.threads' "$st_threads"
-        json_set '.speed_test.display_count' "$st_display"
-        json_set '.speed_test.avg_latency_max' "$st_lat_max"
-        json_set '.speed_test.packet_loss_max' "$st_loss_max"
         json_set '.speed_test.download_speed_min' "$st_speed_min"
-        json_set '.speed_test.url' "$st_url"
-        json_set '.speed_test.colo' "$st_colo"
+        json_set '.speed_test.display_count' "$st_display"
+        json_set '.speed_test.download_timeout' "$st_download_timeout"
     fi
+    [[ "$st_httping" == "true" ]] && json_set '.speed_test.httping_code' "$st_httping_code"
     info "测速设置已保存"
 }
 
-# 分组 4: 高级参数 (延时下限/次数/调试/下载限时/重启等待等低频项)
+# 分组 4: 输出与调试 (显示条数/debug/allip/重启等待)
 config_edit_adv() {
-    echo "==================== 高级参数 ===================="
-    local st_lat_min st_test_times st_download_timeout st_display_results
-    local st_httping_code st_debug st_allip restart_wait_sec
-    st_lat_min=$(cfg_ask_num "平均延迟下限 (ms)" "$(json_get '.speed_test.avg_latency_min')") || return 0
-    st_test_times=$(cfg_ask_num "延迟测速次数" "$(json_get '.speed_test.test_times')") || return 0
-    st_download_timeout=$(cfg_ask_num "单个 IP 下载限时 (s)" "$(json_get '.speed_test.download_timeout')") || return 0
+    echo "==================== 输出与调试 ===================="
+    local st_display_results st_debug st_allip restart_wait_sec
     st_display_results=$(cfg_ask_num "控制台显示条数" "$(json_get '.speed_test.display_results')") || return 0
-    st_httping_code=$(cfg_ask_num "HTTPing 有效状态码" "$(json_get '.speed_test.httping_code')") || return 0
     st_debug=$(cfg_ask_bool "调试输出 -debug" "$(json_get '.speed_test.debug')") || return 0
     st_allip=$(cfg_ask_bool "每段全部 IP -allip" "$(json_get '.speed_test.allip')") || return 0
     restart_wait_sec=$(cfg_ask_num "重启代理后等待 (s)" "$(json_get '.restart_wait_sec')") || return 0
     echo
     cfg_save_confirm || return 1
-    json_set '.speed_test.avg_latency_min' "$st_lat_min"
-    json_set '.speed_test.test_times' "$st_test_times"
-    json_set '.speed_test.download_timeout' "$st_download_timeout"
     json_set '.speed_test.display_results' "$st_display_results"
-    json_set '.speed_test.httping_code' "$st_httping_code"
     json_set '.speed_test.debug' "$st_debug"
     json_set '.speed_test.allip' "$st_allip"
     json_set '.restart_wait_sec' "$restart_wait_sec"
-    info "高级参数已保存"
+    info "输出与调试已保存"
 }
 
 # 分组 5: 验证与自愈 (推送前验证 + 看门狗)
