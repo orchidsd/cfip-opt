@@ -232,6 +232,105 @@ cfg_ask_req() {
     done
 }
 
+# ==================== 分组编辑引擎 ====================
+# 数字小菜单(仿主菜单): 逐项显示当前值, 输入数字单改该项即写盘, 可任意回退.
+# 用法: cfg_group_edit "标题" "规格" "规格"...
+# 规格 = "类型|json路径|描述|附加|条件" (描述内勿含 |)
+#   类型: bool(1/0) num(数字) str(文本,回车保留) req(必填) opt(可清空,回车=当前,
+#        附加填"留空提示") map(枚举, 附加="1=值;2=值") pool(解析池,特殊处理min/max)
+#   条件: "父路径==期望值" 不满足则隐藏该行; "-" 表示无条件
+_cfg_ask_field() {
+    local type="$1" label="$2" cur="$3" extra="$4"
+    case "$type" in
+        bool) cfg_ask_bool "$label" "$cur" ;;
+        num)  cfg_ask_num  "$label" "$cur" ;;
+        req)  cfg_ask_req  "$label" "$cur" ;;
+        str)  cfg_ask "  $label [当前: ${cur:-未设置}] (回车保留, q=取消): " "$cur" ;;
+        opt)  cfg_ask_opt  "$label" "$cur" ;;
+        map)
+            # extra = "1=a;2=b", 拆成 cfg_ask_map 的多参
+            local -a items=(); local it k v
+            IFS=';' read -ra items <<< "$extra"
+            local -a args=(); local item
+            for item in "${items[@]}"; do
+                IFS='=' read -r k v <<< "$item"
+                args+=("$k=$v")
+            done
+            cfg_ask_map "$label" "$cur" "${args[@]}"
+            ;;
+    esac
+}
+
+_cfg_ask_pool() {
+    # 解析池条数: 固定(max==min 时单题) / 区间(min≤max 两题)
+    local maxv minv; maxv=$(json_get '.cloudflare.max_records'); minv=$(json_get '.cloudflare.min_records')
+    local p mn mx
+    if [[ "$maxv" == "$minv" ]]; then
+        p=$(cfg_ask_num "解析池条数 (固定)" "$maxv") || return 1
+        json_set '.cloudflare.max_records' "$p"
+        json_set '.cloudflare.min_records' "$p"
+    else
+        mn=$(cfg_ask_num "解析池目标条数 (下限)" "$minv") || return 1
+        mx=$(cfg_ask_num "解析池上限条数" "$maxv") || return 1
+        if [[ "$mn" -gt "$mx" ]]; then echo "    下限应 ≤ 上限"; return 1; fi
+        json_set '.cloudflare.min_records' "$mn"
+        json_set '.cloudflare.max_records' "$mx"
+    fi
+    info "已保存: 解析池条数"
+}
+
+cfg_group_edit() {
+    local title="$1"; shift
+    local -a specs=("$@")
+    local -a ids=() meta=()
+    local spec type jpath label extra cond cur
+    local oldifs cj cv
+    while :; do
+        echo; echo "===== $title ====="
+        ids=(); meta=()
+        local n=0 i
+        for spec in "${specs[@]}"; do
+            oldifs=$IFS; IFS='|' read -r type jpath label extra cond <<< "$spec"; IFS=$oldifs
+            [[ "$cond" == "-" ]] || {
+                cj=${cond%%==*}; cv=${cond#*==}
+                [[ "$(json_get "$cj" 2>/dev/null)" == "$cv" ]] || continue
+            }
+            n=$((n+1)); ids+=("$n"); meta+=("$spec")
+            if [[ "$type" == "pool" ]]; then
+                local mnv mxv; mnv=$(json_get '.cloudflare.min_records'); mxv=$(json_get '.cloudflare.max_records')
+                if [[ "$mnv" == "$mxv" ]]; then cur="固定 $mxv"; else cur="$mnv~$mxv"; fi
+            else
+                cur=$(json_get "$jpath" 2>/dev/null)
+            fi
+            printf '  %2d) %s  [%s]\n' "$n" "$label" "${cur:-空}"
+        done
+        echo '     0) 返回'
+        read -rp "  输入数字修改该项 (回车=返回): " i
+        [[ -z "$i" || "$i" == "0" ]] && { echo; return 0; }
+        [[ "$i" =~ ^[0-9]+$ ]] || { echo '  无效输入'; continue; }
+        local found=0
+        for n in "${!ids[@]}"; do
+            [[ "${ids[$n]}" == "$i" ]] || continue
+            found=1
+            oldifs=$IFS; IFS='|' read -r type jpath label extra cond <<< "${meta[$n]}"; IFS=$oldifs
+            [[ "$cond" == "-" ]] || {
+                cj=${cond%%==*}; cv=${cond#*==}
+                [[ "$(json_get "$cj" 2>/dev/null)" == "$cv" ]] || { echo '  该项当前不可编辑(依赖未满足)'; break; }
+            }
+            if [[ "$type" == "pool" ]]; then
+                _cfg_ask_pool || break
+            else
+                local newv
+                newv=$(_cfg_ask_field "$type" "$label" "$(json_get "$jpath")" "$extra") || break
+                json_set "$jpath" "$newv"
+                info "已保存: $label = $newv"
+            fi
+            break
+        done
+        [[ "$found" -eq 1 ]] || echo "  无效数字: $i"
+    done
+}
+
 cfg_ask_opt() {
     # 可选项文本: 留空返回空串(表示交给上游用默认), 回车=空; q=取消
     local label cur v; label=$1; cur=$2
@@ -272,174 +371,76 @@ config_change_client() {
 
 # 分组 1: 基本设置 (模式 / IP版本 / 端口)
 config_edit_basic() {
-    echo "==================== 基本设置 ===================="
-    local mode ip_version port
-    mode=$(cfg_ask_map "模式" "$(json_get '.mode')" "1=domain" "2=ip") || return 0
-    ip_version=$(cfg_ask_map "IP 版本" "$(json_get '.ip_version')" "1=ipv4" "2=ipv6") || return 0
-    port=$(cfg_ask_num "端口 (常用 443/80/8443)" "$(json_get '.port')") || return 0
-    echo
-    cfg_save_confirm || return 1
-    json_set '.mode' "$mode"
-    json_set '.ip_version' "$ip_version"
-    json_set '.port' "$port"
-    info "基本设置已保存"
+    cfg_group_edit "基本设置" \
+        "map|.mode|模式|1=domain;2=ip|-" \
+        "map|.ip_version|IP 版本|1=ipv4;2=ipv6|-" \
+        "num|.port|端口 (常用 443/80/8443)||-"
 }
 
 # 分组 2: Cloudflare 账号与解析池 (邮箱/Key/ZoneID/域名/池大小)
 config_edit_account() {
-    echo "============= Cloudflare 账号与解析池 ============="
-    local email zone_id api_key strategy domain subdomain
-    local cf_keep_days cf_max_records cf_min_records cf_hostname cf_node_domains
-    email=$(cfg_ask_req "登录邮箱" "$(json_get '.cloudflare.email')") || return 0
-    zone_id=$(cfg_ask_req "Zone ID" "$(json_get '.cloudflare.zone_id')") || return 0
-    api_key=$(cfg_ask_req "Global API Key" "$(json_get '.cloudflare.api_key')") || return 0
-    strategy=$(cfg_ask_map "策略" "$(json_get '.cloudflare.strategy')" "1=multi_to_one" "2=one_to_one") || return 0
-
-    if [[ "$strategy" == "multi_to_one" ]]; then
-        domain=$(cfg_ask_req "主域名 (如 example.com)" "$(json_get '.cloudflare.domain')") || return 0
-        subdomain=$(cfg_ask "子域名 [$(json_get '.cloudflare.subdomain')]: " "$(json_get '.cloudflare.subdomain')") || return 0
-        cf_node_domains=$(cfg_ask "业务节点域名 (逗号分隔, 回车用子域名探测) [$(json_get '.cloudflare.node_domains')]: " "$(json_get '.cloudflare.node_domains')") || return 0
-        cf_keep_days=$(cfg_ask_num "IP 保留天数 (0=每次全清)" "$(json_get '.cloudflare.keep_days')") || return 0
-        if [[ "$(json_get '.cloudflare.max_records')" == "$(json_get '.cloudflare.min_records')" ]]; then
-            cf_min_records=$(cfg_ask_num "解析池条数 (固定, 如 5)" "$(json_get '.cloudflare.max_records')") || return 0
-            cf_max_records="$cf_min_records"
-        else
-            cf_min_records=$(cfg_ask_num "解析池目标条数" "$(json_get '.cloudflare.min_records')") || return 0
-            cf_max_records=$(cfg_ask_num "解析池上限条数" "$(json_get '.cloudflare.max_records')") || return 0
-        fi
-    else
-        cf_hostname=$(cfg_ask_req "域名列表 (空格分隔)" "$(json_get '.cloudflare.hostname')") || return 0
-    fi
-    echo
-    cfg_save_confirm || return 1
-    json_set '.cloudflare.email' "$email"
-    json_set '.cloudflare.zone_id' "$zone_id"
-    json_set '.cloudflare.api_key' "$api_key"
-    json_set '.cloudflare.strategy' "$strategy"
-    if [[ "$strategy" == "multi_to_one" ]]; then
-        json_set '.cloudflare.domain' "$domain"
-        json_set '.cloudflare.subdomain' "$subdomain"
-        json_set '.cloudflare.keep_days' "$cf_keep_days"
-        json_set '.cloudflare.max_records' "$cf_max_records"
-        json_set '.cloudflare.min_records' "$cf_min_records"
-        json_set '.cloudflare.node_domains' "$cf_node_domains"
-    else
-        json_set '.cloudflare.hostname' "$cf_hostname"
-    fi
-    info "账号与解析池已保存"
+    cfg_group_edit "Cloudflare 账号与解析池" \
+        "req|.cloudflare.email|登录邮箱||-" \
+        "req|.cloudflare.zone_id|Zone ID||-" \
+        "req|.cloudflare.api_key|Global API Key||-" \
+        "map|.cloudflare.strategy|策略|1=multi_to_one;2=one_to_one|-" \
+        "req|.cloudflare.domain|主域名 (如 example.com)||.cloudflare.strategy==multi_to_one" \
+        "str|.cloudflare.subdomain|子域名||.cloudflare.strategy==multi_to_one" \
+        "str|.cloudflare.node_domains|业务节点域名 (逗号分隔)||.cloudflare.strategy==multi_to_one" \
+        "num|.cloudflare.keep_days|IP 保留天数 (0=每次全清)||.cloudflare.strategy==multi_to_one" \
+        "pool|.cloudflare.max_records|解析池条数||.cloudflare.strategy==multi_to_one" \
+        "req|.cloudflare.hostname|域名列表 (空格分隔)||.cloudflare.strategy==one_to_one"
 }
 
 # 分组 3: 测速设置 (开关/地址/线程/延迟阈值/丢包/下载/HTTPing/地区)
 config_edit_speed() {
-    echo "==================== 测速设置 ===================="
-    local st_enabled st_url st_threads st_test_times st_lat_max st_lat_min st_loss_max
-    local st_speed_min st_display st_download_timeout st_httping st_httping_code st_colo
-    st_enabled=$(cfg_ask_bool "启用下载测速" "$(json_get '.speed_test.enabled')") || return 0
-    st_url=$(cfg_ask_opt "测速地址 (留空=官方端点 speed.cloudflare.com)" "$(json_get '.speed_test.url')") || return 0
-    st_threads=$(cfg_ask_num "线程数 (1-1000)" "$(json_get '.speed_test.threads')") || return 0
-    st_test_times=$(cfg_ask_num "延迟测速次数" "$(json_get '.speed_test.test_times')") || return 0
-    st_lat_max=$(cfg_ask_num "平均延迟上限 (ms)" "$(json_get '.speed_test.avg_latency_max')") || return 0
-    st_lat_min=$(cfg_ask_num "平均延迟下限 (ms)" "$(json_get '.speed_test.avg_latency_min')") || return 0
-    st_loss_max=$(cfg_ask_num "丢包率上限 (0.00-1.00)" "$(json_get '.speed_test.packet_loss_max')") || return 0
-    if [[ "$st_enabled" == "true" ]]; then
-        st_speed_min=$(cfg_ask_num "下载速度下限 (MB/s, 0=不限)" "$(json_get '.speed_test.download_speed_min')") || return 0
-        st_display=$(cfg_ask_num "下载测速 IP 数量" "$(json_get '.speed_test.display_count')") || return 0
-        st_download_timeout=$(cfg_ask_num "单个 IP 下载限时 (s)" "$(json_get '.speed_test.download_timeout')") || return 0
-    fi
-    st_httping=$(cfg_ask_bool "延迟测速用 HTTP 协议" "$(json_get '.speed_test.httping')") || return 0
-    if [[ "$st_httping" == "true" ]]; then
-        st_httping_code=$(cfg_ask_num "HTTPing 有效状态码" "$(json_get '.speed_test.httping_code')") || return 0
-    fi
-    st_colo=$(cfg_ask "地区过滤 (逗号分隔, 仅 HTTPing+IPv4 生效) [$(json_get '.speed_test.colo')]: " "$(json_get '.speed_test.colo')") || return 0
-    echo
-    cfg_save_confirm || return 1
-    json_set '.speed_test.enabled' "$st_enabled"
-    json_set '.speed_test.url' "$st_url"
-    json_set '.speed_test.threads' "$st_threads"
-    json_set '.speed_test.test_times' "$st_test_times"
-    json_set '.speed_test.avg_latency_max' "$st_lat_max"
-    json_set '.speed_test.avg_latency_min' "$st_lat_min"
-    json_set '.speed_test.packet_loss_max' "$st_loss_max"
-    json_set '.speed_test.httping' "$st_httping"
-    json_set '.speed_test.colo' "$st_colo"
-    if [[ "$st_enabled" == "true" ]]; then
-        json_set '.speed_test.download_speed_min' "$st_speed_min"
-        json_set '.speed_test.display_count' "$st_display"
-        json_set '.speed_test.download_timeout' "$st_download_timeout"
-    fi
-    [[ "$st_httping" == "true" ]] && json_set '.speed_test.httping_code' "$st_httping_code"
-    info "测速设置已保存"
+    cfg_group_edit "测速设置" \
+        "bool|.speed_test.enabled|启用下载测速||-" \
+        "opt|.speed_test.url|测速地址 (留空=官方端点)||-" \
+        "num|.speed_test.threads|线程数 (1-1000)||-" \
+        "num|.speed_test.test_times|延迟测速次数||-" \
+        "num|.speed_test.avg_latency_max|平均延迟上限 (ms)||-" \
+        "num|.speed_test.avg_latency_min|平均延迟下限 (ms)||-" \
+        "num|.speed_test.packet_loss_max|丢包率上限 (0.00-1.00)||-" \
+        "num|.speed_test.download_speed_min|下载速度下限 (MB/s, 0=不限)||.speed_test.enabled==true" \
+        "num|.speed_test.display_count|下载测速 IP 数量||.speed_test.enabled==true" \
+        "num|.speed_test.download_timeout|单个 IP 下载限时 (s)||.speed_test.enabled==true" \
+        "bool|.speed_test.httping|延迟测速用 HTTP 协议||-" \
+        "num|.speed_test.httping_code|HTTPing 有效状态码 (仅 HTTPing 生效)||-" \
+        "str|.speed_test.colo|地区过滤 (仅 HTTPing+IPv4 生效)||-"
 }
 
 # 分组 4: 输出与调试 (显示条数/debug/allip/重启等待)
 config_edit_adv() {
-    echo "==================== 输出与调试 ===================="
-    local st_display_results st_debug st_allip restart_wait_sec
-    st_display_results=$(cfg_ask_num "控制台显示条数" "$(json_get '.speed_test.display_results')") || return 0
-    st_debug=$(cfg_ask_bool "调试输出 -debug" "$(json_get '.speed_test.debug')") || return 0
-    st_allip=$(cfg_ask_bool "每段全部 IP -allip" "$(json_get '.speed_test.allip')") || return 0
-    restart_wait_sec=$(cfg_ask_num "重启代理后等待 (s)" "$(json_get '.restart_wait_sec')") || return 0
-    echo
-    cfg_save_confirm || return 1
-    json_set '.speed_test.display_results' "$st_display_results"
-    json_set '.speed_test.debug' "$st_debug"
-    json_set '.speed_test.allip' "$st_allip"
-    json_set '.restart_wait_sec' "$restart_wait_sec"
-    info "输出与调试已保存"
+    cfg_group_edit "输出与调试" \
+        "num|.speed_test.display_results|控制台显示条数||-" \
+        "bool|.speed_test.debug|调试输出 -debug||-" \
+        "bool|.speed_test.allip|每段全部 IP -allip||-" \
+        "num|.restart_wait_sec|重启代理后等待 (s)||-"
 }
 
 # 分组 5: 验证与自愈 (推送前验证 + 看门狗)
 config_edit_verify() {
-    echo "==================== 验证与自愈 ===================="
-    local v_enabled v_max v_probes wd_enabled wd_auto wd_fail
-    v_enabled=$(cfg_ask_bool "推送前验证" "$(json_get '.verify.enabled')") || return 0
-    v_max=$(cfg_ask_num "验证响应阈值 (ms)" "$(json_get '.verify.max_ms')") || return 0
-    v_probes=$(cfg_ask_num "每次探测次数" "$(json_get '.verify.probes')") || return 0
-    wd_enabled=$(cfg_ask_bool "自愈看门狗" "$(json_get '.watchdog.enabled')") || return 0
-    if [[ "$wd_enabled" == "true" ]]; then
-        wd_auto=$(cfg_ask_bool "失败后自动重选 (否=仅通知)" "$(json_get '.watchdog.auto_run')") || return 0
-        wd_fail=$(cfg_ask_num "连续失败几次触发" "$(json_get '.watchdog.fail_consecutive')") || return 0
-    fi
-    echo
-    cfg_save_confirm || return 1
-    json_set '.verify.enabled' "$v_enabled"
-    json_set '.verify.max_ms' "$v_max"
-    json_set '.verify.probes' "$v_probes"
-    json_set '.watchdog.enabled' "$wd_enabled"
-    json_set '.watchdog.auto_run' "$wd_auto"
-    json_set '.watchdog.fail_consecutive' "$wd_fail"
-    info "验证与自愈已保存"
+    cfg_group_edit "验证与自愈" \
+        "bool|.verify.enabled|推送前验证||-" \
+        "num|.verify.max_ms|验证响应阈值 (ms)||-" \
+        "num|.verify.probes|每次探测次数||-" \
+        "bool|.watchdog.enabled|自愈看门狗||-" \
+        "bool|.watchdog.auto_run|失败后自动重选 (否=仅通知)||.watchdog.enabled==true" \
+        "num|.watchdog.fail_consecutive|连续失败几次触发||.watchdog.enabled==true"
 }
 
 # 分组 6: IP列表与通知 (自动更新 / Telegram / PushPlus)
 config_edit_notify() {
-    echo "================== IP列表与通知 ==================="
-    local il_auto il_age tg_enabled tg_token tg_user_id tg_host pp_enabled pp_token
-    il_auto=$(cfg_ask_bool "IP 列表自动更新" "$(json_get '.ip_list.auto_update')") || return 0
-    il_age=$(cfg_ask_num "超过几天刷新列表" "$(json_get '.ip_list.max_age_days')") || return 0
-    tg_enabled=$(cfg_ask_bool "启用 Telegram 通知" "$(json_get '.notifications.telegram.enabled')") || return 0
-    if [[ "$tg_enabled" == "true" ]]; then
-        tg_token=$(cfg_ask_req "Telegram Bot Token" "$(json_get '.notifications.telegram.bot_token')") || return 0
-        tg_user_id=$(cfg_ask_req "Telegram User ID" "$(json_get '.notifications.telegram.user_id')") || return 0
-        tg_host=$(cfg_ask "API Host (回车用官方)" "$(json_get '.notifications.telegram.api_host')") || return 0
-    fi
-    pp_enabled=$(cfg_ask_bool "启用 PushPlus 通知" "$(json_get '.notifications.pushplus.enabled')") || return 0
-    if [[ "$pp_enabled" == "true" ]]; then
-        pp_token=$(cfg_ask_req "PushPlus Token" "$(json_get '.notifications.pushplus.token')") || return 0
-    fi
-    echo
-    cfg_save_confirm || return 1
-    json_set '.ip_list.auto_update' "$il_auto"
-    json_set '.ip_list.max_age_days' "$il_age"
-    json_set '.notifications.telegram.enabled' "$tg_enabled"
-    [[ "$tg_enabled" == "true" ]] && {
-        json_set '.notifications.telegram.bot_token' "$tg_token"
-        json_set '.notifications.telegram.user_id' "$tg_user_id"
-        json_set '.notifications.telegram.api_host' "$tg_host"
-    }
-    json_set '.notifications.pushplus.enabled' "$pp_enabled"
-    [[ "$pp_enabled" == "true" ]] && json_set '.notifications.pushplus.token' "$pp_token"
-    info "IP列表与通知已保存"
+    cfg_group_edit "IP列表与通知" \
+        "bool|.ip_list.auto_update|IP 列表自动更新||-" \
+        "num|.ip_list.max_age_days|超过几天刷新列表||-" \
+        "bool|.notifications.telegram.enabled|启用 Telegram 通知||-" \
+        "req|.notifications.telegram.bot_token|Telegram Bot Token||.notifications.telegram.enabled==true" \
+        "req|.notifications.telegram.user_id|Telegram User ID||.notifications.telegram.enabled==true" \
+        "str|.notifications.telegram.api_host|API Host (回车用官方)||.notifications.telegram.enabled==true" \
+        "bool|.notifications.pushplus.enabled|启用 PushPlus 通知||-" \
+        "req|.notifications.pushplus.token|PushPlus Token||.notifications.pushplus.enabled==true"
 }
 
 # ============ 定时任务组 (直接读写 crontab, 与本项目行幂等去重) ============
@@ -505,22 +506,10 @@ config_edit_cron() {
 
 # 分组 8: 高峰跳过 (电信晚高峰时段跳过优选, 避免测出伪差结果)
 config_edit_peak() {
-    echo "==================== 高峰跳过 ===================="
-    local pk_en pk_s pk_e
-    pk_en=$(cfg_ask_bool "启用高峰时段跳过优选(晚高峰不测速)" "$(json_get '.peak_hours.enabled')") || return 0
-    pk_s=$(json_get '.peak_hours.start'); pk_e=$(json_get '.peak_hours.end')
-    [[ "$pk_s" =~ ^[0-9]+$ ]] || pk_s=21
-    [[ "$pk_e" =~ ^[0-9]+$ ]] || pk_e=6
-    if [[ "$pk_en" == "true" ]]; then
-        pk_s=$(cfg_ask_num "高峰开始小时 (0-23)" "$pk_s") || return 0
-        pk_e=$(cfg_ask_num "高峰结束小时 (0-23, 可跨午夜如 21→6)" "$pk_e") || return 0
-    fi
-    echo
-    cfg_save_confirm || return 1
-    json_set '.peak_hours.enabled' "$pk_en"
-    json_set '.peak_hours.start' "$pk_s"
-    json_set '.peak_hours.end' "$pk_e"
-    info "高峰跳过已保存: 启用=$pk_en, ${pk_s}:00→${pk_e}:00"
+    cfg_group_edit "高峰跳过" \
+        "bool|.peak_hours.enabled|启用高峰时段跳过优选(晚高峰不测速)||-" \
+        "num|.peak_hours.start|高峰开始小时 (0-23)||.peak_hours.enabled==true" \
+        "num|.peak_hours.end|高峰结束小时 (0-23, 可跨午夜如 21→6)||.peak_hours.enabled==true"
 }
 
 # 全量入口: 依次走完所有分组 (对应子命令 cfip-opt.sh config)

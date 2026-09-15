@@ -183,18 +183,18 @@ ip_test_run() {
         : > "$SPEED_URL_FILE"
     fi
 
-    if [[ "$ip_version" == "ipv4" ]]; then
-        local colo
-        colo=$(json_get '.speed_test.colo')
-        if [[ -z "$colo" ]]; then
-            colo="$CF_COLO_DEFAULT"
-        fi
-        cfst_args+=("-cfcolo" "$colo")
-    fi
-
     if [[ "$speed_test_httping" == "true" ]]; then
         cfst_args+=("-httping")
         cfst_args+=("-httping-code" "$speed_test_httping_code")
+        # -cfcolo 仅 HTTPing 模式有效, 且只收 IPv4 列表的地区码
+        if [[ "$ip_version" == "ipv4" ]]; then
+            local colo
+            colo=$(json_get '.speed_test.colo')
+            if [[ -z "$colo" ]]; then
+                colo="$CF_COLO_DEFAULT"
+            fi
+            cfst_args+=("-cfcolo" "$colo")
+        fi
     fi
     [[ "$speed_test_debug" == "true" ]] && cfst_args+=("-debug")
     [[ "$speed_test_allip" == "true" ]] && cfst_args+=("-allip")
