@@ -237,7 +237,7 @@ cfg_ask_req() {
 # 用法: cfg_group_edit "标题" "规格" "规格"...
 # 规格 = "类型|json路径|描述|附加|条件" (描述内勿含 |)
 #   类型: bool(1/0) num(数字) str(文本,回车保留) req(必填) opt(可清空,回车=当前,
-#        附加填"留空提示") map(枚举, 附加="1=值;2=值") pool(解析池,特殊处理min/max)
+#        附加填"留空提示") map(枚举, 附加="1=值;2=值")
 #   条件: "父路径==期望值" 不满足则隐藏该行; "-" 表示无条件
 _cfg_ask_field() {
     local type="$1" label="$2" cur="$3" extra="$4"
@@ -261,24 +261,6 @@ _cfg_ask_field() {
     esac
 }
 
-_cfg_ask_pool() {
-    # 解析池条数: 固定(max==min 时单题) / 区间(min≤max 两题)
-    local maxv minv; maxv=$(json_get '.cloudflare.max_records'); minv=$(json_get '.cloudflare.min_records')
-    local p mn mx
-    if [[ "$maxv" == "$minv" ]]; then
-        p=$(cfg_ask_num "解析池条数 (固定)" "$maxv") || return 1
-        json_set '.cloudflare.max_records' "$p"
-        json_set '.cloudflare.min_records' "$p"
-    else
-        mn=$(cfg_ask_num "解析池目标条数 (下限)" "$minv") || return 1
-        mx=$(cfg_ask_num "解析池上限条数" "$maxv") || return 1
-        if [[ "$mn" -gt "$mx" ]]; then echo "    下限应 ≤ 上限"; return 1; fi
-        json_set '.cloudflare.min_records' "$mn"
-        json_set '.cloudflare.max_records' "$mx"
-    fi
-    info "已保存: 解析池条数"
-}
-
 cfg_group_edit() {
     local title="$1"; shift
     local -a specs=("$@")
@@ -296,12 +278,7 @@ cfg_group_edit() {
                 [[ "$(json_get "$cj" 2>/dev/null)" == "$cv" ]] || continue
             }
             n=$((n+1)); ids+=("$n"); meta+=("$spec")
-            if [[ "$type" == "pool" ]]; then
-                local mnv mxv; mnv=$(json_get '.cloudflare.min_records'); mxv=$(json_get '.cloudflare.max_records')
-                if [[ "$mnv" == "$mxv" ]]; then cur="固定 $mxv"; else cur="$mnv~$mxv"; fi
-            else
-                cur=$(json_get "$jpath" 2>/dev/null)
-            fi
+            cur=$(json_get "$jpath" 2>/dev/null)
             printf '  %2d) %s  [%s]\n' "$n" "$label" "${cur:-空}"
         done
         echo '     0) 返回'
@@ -317,14 +294,10 @@ cfg_group_edit() {
                 cj=${cond%%==*}; cv=${cond#*==}
                 [[ "$(json_get "$cj" 2>/dev/null)" == "$cv" ]] || { echo '  该项当前不可编辑(依赖未满足)'; break; }
             }
-            if [[ "$type" == "pool" ]]; then
-                _cfg_ask_pool || break
-            else
-                local newv
-                newv=$(_cfg_ask_field "$type" "$label" "$(json_get "$jpath")" "$extra") || break
-                json_set "$jpath" "$newv"
-                info "已保存: $label = $newv"
-            fi
+            local newv
+            newv=$(_cfg_ask_field "$type" "$label" "$(json_get "$jpath")" "$extra") || break
+            json_set "$jpath" "$newv"
+            info "已保存: $label = $newv"
             break
         done
         [[ "$found" -eq 1 ]] || echo "  无效数字: $i"
@@ -388,7 +361,8 @@ config_edit_account() {
         "str|.cloudflare.subdomain|子域名||.cloudflare.strategy==multi_to_one" \
         "str|.cloudflare.node_domains|业务节点域名 (逗号分隔)||.cloudflare.strategy==multi_to_one" \
         "num|.cloudflare.keep_days|IP 保留天数 (0=每次全清)||.cloudflare.strategy==multi_to_one" \
-        "pool|.cloudflare.max_records|解析池条数||.cloudflare.strategy==multi_to_one" \
+        "num|.cloudflare.min_records|解析池目标条数 (min, 1-100)||.cloudflare.strategy==multi_to_one" \
+        "num|.cloudflare.max_records|解析池上限条数 (max, ≥min)||.cloudflare.strategy==multi_to_one" \
         "req|.cloudflare.hostname|域名列表 (空格分隔)||.cloudflare.strategy==one_to_one"
 }
 
