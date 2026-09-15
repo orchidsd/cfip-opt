@@ -59,6 +59,7 @@ fi
 
 # 加载日志/工具函数(此时 INSTALL_DIR 已定, 路径才对)
 source "$INSTALL_DIR/lib/common.sh"
+source "$INSTALL_DIR/lib/ip_test.sh"
 
 # 目录常量(与 common.sh 一一对应)
 BIN_DIR="$INSTALL_DIR/bin"
@@ -172,19 +173,27 @@ download_ip_lists() {
     # 优先用 cfst 压缩包带出的列表(download_cfst 里已复制), 缺失才在线拉取
     [[ -s "$IP_DIR/ip.txt" ]] && { info "IPv4 列表已就绪"; } || {
         warn "缺乏 IPv4 列表，从镜像下载..."
-        local urls=(
-            "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-            "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-            "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-        )
-        local url
-        for url in "${urls[@]}"; do
-            if curl -fsSL --connect-timeout 10 --max-time 60 -o "$IP_DIR/ip.txt" "$url" 2>/dev/null \
-                && [[ -s "$IP_DIR/ip.txt" ]]; then
-                info "IPv4 列表下载完成 ($url)"
-                break
+local urls=(
+        "https://www.cloudflare.com/ips-v4"
+        "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+        "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+        "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+    )
+    local url
+    for url in "${urls[@]}"; do
+        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$IP_DIR/ip.txt.tmp" "$url" 2>/dev/null \
+            && [[ -s "$IP_DIR/ip.txt.tmp" ]]; then
+            if [[ "$url" == *"cloudflare.com/ips-v4" ]]; then
+                _expand_official_v4 < "$IP_DIR/ip.txt.tmp" > "$IP_DIR/ip.txt"
+                rm -f "$IP_DIR/ip.txt.tmp"
+            else
+                mv "$IP_DIR/ip.txt.tmp" "$IP_DIR/ip.txt"
             fi
-        done
+            info "IPv4 列表下载完成 ($url)"
+            break
+        fi
+        rm -f "$IP_DIR/ip.txt.tmp"
+    done
         [[ -s "$IP_DIR/ip.txt" ]] || warn "IPv4 列表下载失败，可稍后手动放入 $IP_DIR/ip.txt"
     }
 
