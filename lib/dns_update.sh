@@ -398,12 +398,16 @@ dns_update_ip_only() {
 }
 
 dns_update_main() {
-    cf_verify_credentials
-    : > "$REPORT_FILE"
-    ip_verify_run || return 0
-
     local mode
     mode=$(json_get '.mode')
+
+    : > "$REPORT_FILE"
+
+    # mode=ip 只需本地列结果, 不需要 CF 凭据; domain 才校验凭据并验证候选
+    if [[ "$mode" == "domain" ]]; then
+        cf_verify_credentials
+        ip_verify_run || return 0
+    fi
 
     case "$mode" in
         domain)
