@@ -59,7 +59,6 @@ fi
 
 # 加载日志/工具函数(此时 INSTALL_DIR 已定, 路径才对)
 source "$INSTALL_DIR/lib/common.sh"
-source "$INSTALL_DIR/lib/ip_test.sh"
 
 # 目录常量(与 common.sh 一一对应)
 BIN_DIR="$INSTALL_DIR/bin"
@@ -174,32 +173,26 @@ download_ip_lists() {
     [[ -s "$IP_DIR/ip.txt" ]] && { info "IPv4 列表已就绪"; } || {
         warn "缺乏 IPv4 列表，从镜像下载..."
 local urls=(
-        "https://www.cloudflare.com/ips-v4"
-        "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-        "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-        "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
-    )
-    local url
-    for url in "${urls[@]}"; do
-        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$IP_DIR/ip.txt.tmp" "$url" 2>/dev/null \
-            && [[ -s "$IP_DIR/ip.txt.tmp" ]]; then
-            if [[ "$url" == *"cloudflare.com/ips-v4" ]]; then
-                _expand_official_v4 < "$IP_DIR/ip.txt.tmp" > "$IP_DIR/ip.txt"
-                rm -f "$IP_DIR/ip.txt.tmp"
-            else
-                mv "$IP_DIR/ip.txt.tmp" "$IP_DIR/ip.txt"
+            "https://www.cloudflare.com/ips-v4"
+            "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+            "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+            "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+        )
+        local url
+        for url in "${urls[@]}"; do
+            if curl -fsSL --connect-timeout 10 --max-time 60 -o "$IP_DIR/ip.txt" "$url" 2>/dev/null \
+                && [[ -s "$IP_DIR/ip.txt" ]]; then
+                info "IPv4 列表下载完成 ($url)"
+                break
             fi
-            info "IPv4 列表下载完成 ($url)"
-            break
-        fi
-        rm -f "$IP_DIR/ip.txt.tmp"
-    done
+        done
         [[ -s "$IP_DIR/ip.txt" ]] || warn "IPv4 列表下载失败，可稍后手动放入 $IP_DIR/ip.txt"
     }
 
     [[ -s "$IP_DIR/ipv6.txt" ]] && { info "IPv6 列表已就绪"; } || {
         warn "缺乏 IPv6 列表，从镜像下载..."
         local urls=(
+            "https://www.cloudflare.com/ips-v6"
             "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"
             "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"
             "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"

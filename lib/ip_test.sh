@@ -12,15 +12,12 @@ source "$LIB_DIR/common.sh"
 # 未配置 colo(地区)时的默认选择: 亚太+美西骨干节点(实测延迟/稳定性均衡)
 readonly CF_COLO_DEFAULT="TPE,HKG,NRT,HND,KIX,SIN,LAX,SJC,SEA,OKA,ICN,FRA"
 
-# 候选列表镜像源(依次降级):
-#   IPv4: 1) CF 官方公开段 ips-v4(下载后由 _expand_official_v4 拆成 /24 粒度)
-#         2) XIU2 库(同样是官方段拆分过滤的细分候选, 多一份冗余)
-#   IPv6: 仅 XIU2 细分库(官方 ips-v6 是 /48 粗段, 无法拆成 ipv6.txt 的 /64 粒度)
-# 注: 官方 ips-v4 是 /12 ~ /32 粗段, 直接喂 cfst 会被展开成上百万 IP 不可用,
-#     必须拆成 /24 取代表 IP, 总行数与 XIU2 库(约6000)同量级
+# 候选列表镜像源(依次降级): 官方公开段直接使用(cfst 默认按 /24 段采样测速,
+# 不会展开成海量 IP); XIU2 库 = 官方段拆分过滤后的细分候选, 作降级冗余
 ip_list_mirrors() {
     local ip_version="$1"
     if [[ "$ip_version" == "ipv6" ]]; then
+        echo "https://www.cloudflare.com/ips-v6"
         echo "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"
         echo "https://raw.gitmirror.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"
         echo "https://ghproxy.net/https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt"
@@ -47,21 +44,6 @@ ip_list_age_days() {
     echo $(( (now - mtime) / 86400 ))
 }
 
-# 官方 ips-v4 粗段(CIDR) → 每 /24 取代表 IP(a.b.c.1), 输出 ip.txt 候选
-_expand_official_v4() {
-    local line ip mask a b c d start hostbits s
-    while IFS= read -r line; do
-        [[ "$line" == */* ]] || continue
-        ip=${line%/*}; mask=${line#*/}
-        [[ "$mask" =~ ^[0-9]+$ && "$mask" -ge 8 && "$mask" -le 24 ]] || continue
-        IFS=. read -r a b c d <<< "$ip"
-        start=$(( ((a<<24) + (b<<16) + (c<<8) + d) & ~((1 << (32-mask)) - 1) ))
-        for ((s=start; s < start + (1 << (32-mask)); s += 256)); do
-            printf '%d.%d.%d.1\n' $(( (s>>24)&255 )) $(( (s>>16)&255 )) $(( (s>>8)&255 ))
-        done
-    done
-}
-
 # 在线更新 IP 候选列表: 依次尝试镜像源, 成功即替换
 ip_list_update() {
     local ip_version f url
@@ -74,12 +56,7 @@ ip_list_update() {
     while IFS= read -r url; do
         info "尝试: $url"
         if curl -fsSL --connect-timeout 10 --max-time 60 -o "$f.tmp" "$url" 2>/dev/null && [[ -s "$f.tmp" ]]; then
-            if [[ "$url" == *"cloudflare.com/ips-v4" ]]; then
-                _expand_official_v4 < "$f.tmp" > "$f"
-                rm -f "$f.tmp"
-            else
-                mv "$f.tmp" "$f"
-            fi
+            mv "$f.tmp" "$f"
             fetched=1
             info "IP 列表更新完成 ($(wc -l < "$f") 条候选)"
             break
