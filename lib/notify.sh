@@ -73,6 +73,13 @@ notify_pushplus() {
 # 逐渠道转发同一条消息(每个渠道内部自行判断是否启用)
 notify_all() {
     local message="$1"
+    local tg_en pp_en
+    tg_en=$(json_get '.notifications.telegram.enabled')
+    pp_en=$(json_get '.notifications.pushplus.enabled')
+    if [[ "$tg_en" != "true" && "$pp_en" != "true" ]]; then
+        warn "通知渠道均未启用 (菜单 10 配置 TG/PushPlus)"
+        return 1
+    fi
     notify_telegram "$message"
     notify_pushplus "$message"
 }
